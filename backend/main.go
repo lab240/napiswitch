@@ -49,6 +49,8 @@ func main() {
 	runNetDir := flag.String("run-netdir", "/run/systemd/network", "runtime networkd directory (applied L3 config)")
 	fwFile := flag.String("fw-file", "/run/napi-switch/firewall.nft", "nft script of the loaded firewall")
 	dry := flag.Bool("dry-run", false, "log commands instead of executing them")
+	rmiiFix := flag.Bool("rmii-fix", true, "TEMPORARY board-bug workaround: switch the KSZ CPU port to the SoC's RMII clock (no-op once R29 is reworked)")
+	kszMod := flag.String("kszreg-module", "/usr/lib/napi-switch/kszreg-%s.ko", "one-shot register module (%s = kernel release)")
 	flag.Parse()
 
 	l := log.New(os.Stderr, "", 0)
@@ -71,6 +73,19 @@ func main() {
 		l.Fatalf("start: %v", err)
 	}
 	api := &API{m: m, token: token, version: version}
+	if *rmiiFix {
+		f := &rmiiFixer{r: m.r, log: l, regmaps: "/sys/kernel/debug/regmap", devtree: "/sys/class/net", module: *kszMod,
+			conduit: func() string {
+				if _, run, err := m.Ports(); err == nil {
+					return run.Conduit
+				}
+				return ""
+			}}
+		st := f.Check()
+		l.Printf("rmii: clock=%s xmii_ctrl1=%s %s", st.Clock, st.Reg, st.Error)
+		go f.Watch(time.Minute)
+		api.rmii = f
+	}
 	srv := &http.Server{Addr: *listen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	l.Printf("napi-switchd %s listening on %s", version, *listen)
 	l.Fatal(srv.ListenAndServe())

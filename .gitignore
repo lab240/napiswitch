@@ -4,3 +4,12 @@ backend/deploy/napi-switchd
 # vendor documentation (datasheets) and internal notes are kept locally
 docs/
 napi-switch-problems.md
+# kernel module build output
+backend/kmod/kszreg/*.o
+backend/kmod/kszreg/*.ko
+backend/kmod/kszreg/*.mod*
+backend/kmod/kszreg/.*.cmd
+backend/kmod/kszreg/Module.symvers
+backend/kmod/kszreg/modules.order
+# board schematic is kept locally
+scheme/

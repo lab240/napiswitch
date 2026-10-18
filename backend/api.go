@@ -29,6 +29,7 @@ type API struct {
 	m       *Manager
 	token   string
 	version string
+	rmii    *rmiiFixer // nil with -rmii-fix=false
 }
 
 func (a *API) Handler() http.Handler {
@@ -583,6 +584,9 @@ func (a *API) system(*http.Request) (any, error) {
 			cpu["switch_rx_crc_errors"] = c["s00_p05_rx_crc_err"]
 			cpu["switch_rx_align_errors"] = c["s00_p05_rx_align_err"]
 		}
+	}
+	if a.rmii != nil {
+		cpu["rmii"] = a.rmii.Status()
 	}
 	return map[string]any{
 		"name": cfg.System.Name, "location": cfg.System.Location, "contact": cfg.System.Contact,
