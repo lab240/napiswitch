@@ -413,7 +413,7 @@ Access-порт: `pvid` без `tagged`. Trunk: `pvid` (native) + `tagged`. То
   "lan": {
     "proto": "dhcp", "address": "192.168.1.1/24", "gateway": "", "dns": [],
     "dhcp_server": {
-      "enabled": true, "pool_offset": 100, "pool_size": 100, "lease_time": 43200, "dns": [],
+      "enabled": true, "pool_start": "192.168.1.100", "pool_end": "192.168.1.199", "lease_time": 43200, "dns": [],
       "static_leases": [{"mac": "02:00:00:00:00:10", "address": "192.168.1.10", "name": "plc"}]
     }
   },
@@ -433,7 +433,7 @@ Access-порт: `pvid` без `tagged`. Trunk: `pvid` (native) + `tagged`. То
 | `lan.proto`, `lan.gateway`, `lan.dns` | адрес br0 в режиме `switch` (`dhcp` / `static`) |
 | `lan.address` | в режиме `router` — адрес роутера в LAN (CIDR); в `switch` + `static` — адрес br0 |
 | `dhcp_server.enabled` | DHCP-сервер в LAN (только `router`) |
-| `pool_offset`, `pool_size` | пул: с адреса «сеть + offset», `size` адресов |
+| `pool_start`, `pool_end` | диапазон выдаваемых адресов включительно, например `192.168.1.100` – `192.168.1.199`. Должен лежать в подсети LAN и не содержать адрес роутера |
 | `lease_time` | срок аренды, с |
 | `dhcp_server.dns` | DNS для клиентов; пусто — те, что получены на WAN |
 | `static_leases` | закреплённые адреса `{mac, address, name}` |
@@ -441,8 +441,8 @@ Access-порт: `pvid` без `tagged`. Trunk: `pvid` (native) + `tagged`. То
 | `wan_allow` | что разрешено с WAN к самой плате: `ssh` (22), `web` (порт веб-интерфейса), `ping` |
 | `port_forwards` | проброс `wan_port` → `dest:dest_port`; `proto`: `tcp`, `udp`, `both`; `dest_port: 0` — тот же порт |
 
-Проверки: адреса и шлюзы корректны и в своей подсети, LAN не пересекается с WAN, пул
-DHCP внутри подсети и не включает адрес роутера, закреплённые адреса внутри подсети,
+Проверки: адреса и шлюзы корректны и в своей подсети, LAN не пересекается с WAN, диапазон
+DHCP внутри подсети, начало не позже конца, адрес роутера не входит, закреплённые адреса внутри подсети,
 проброшенный порт не конфликтует с открытыми ssh/web. Предупреждения: DHCP-сервер на
 портах, где есть линк (возможно, подключена чужая сеть); не установлен nftables; закрыт
 доступ ssh/web с WAN.

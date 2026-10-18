@@ -187,7 +187,7 @@ VLAN (режим 802.1Q, VLAN управления, матрица U/T), STP, MA
   "mode": "router",
   "wan": {"interface": "enx00e04c680026", "proto": "dhcp", "address": "", "gateway": "", "dns": []},
   "lan": {"proto": "dhcp", "address": "192.168.1.1/24", "gateway": "", "dns": [],
-          "dhcp_server": {"enabled": true, "pool_offset": 100, "pool_size": 100, "lease_time": 43200,
+          "dhcp_server": {"enabled": true, "pool_start": "192.168.1.100", "pool_end": "192.168.1.199", "lease_time": 43200,
                           "dns": [], "static_leases": [{"mac": "02:00:00:00:00:10", "address": "192.168.1.10", "name": "plc"}]}},
   "firewall": {"enabled": true, "wan_allow": ["ssh", "web"],
                "port_forwards": [{"name": "cam", "proto": "tcp", "wan_port": 8554, "dest": "192.168.1.20", "dest_port": 554}]}

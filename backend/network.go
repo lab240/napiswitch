@@ -60,8 +60,8 @@ type LAN struct {
 
 type DHCPServer struct {
 	Enabled      bool          `json:"enabled"`
-	PoolOffset   int           `json:"pool_offset"` // first address = subnet + offset
-	PoolSize     int           `json:"pool_size"`
+	PoolStart    string        `json:"pool_start"` // first address handed out, e.g. 192.168.1.100
+	PoolEnd      string        `json:"pool_end"`   // last address, inclusive
 	LeaseTime    int           `json:"lease_time"` // seconds
 	DNS          []string      `json:"dns"`        // empty: hand out the WAN DNS servers
 	StaticLeases []StaticLease `json:"static_leases"`
@@ -102,7 +102,7 @@ func DefaultNetwork(wan string) *Network {
 	n := &Network{Mode: "switch",
 		WAN: WAN{Interface: wan, Proto: "dhcp"},
 		LAN: LAN{Proto: "dhcp", Address: "192.168.1.1/24",
-			DHCPServer: DHCPServer{Enabled: true, PoolOffset: 100, PoolSize: 100, LeaseTime: 43200}},
+			DHCPServer: DHCPServer{Enabled: true, PoolStart: "192.168.1.100", PoolEnd: "192.168.1.199", LeaseTime: 43200}},
 		Firewall: Firewall{Enabled: true, WANAllow: []string{"ssh", "web", "ping"}}}
 	n.Normalize()
 	return n
@@ -151,6 +151,29 @@ func parseHost(s string) (netip.Prefix, error) {
 		return p, fmt.Errorf("is the network or broadcast address")
 	}
 	return p, nil
+}
+
+// poolRange converts the pool_start..pool_end range into the offset and size
+// networkd wants, checking that it lies inside the LAN subnet and does not
+// contain the router address.
+func poolRange(lan netip.Prefix, d DHCPServer) (off, size int, err error) {
+	a, e1 := netip.ParseAddr(d.PoolStart)
+	b, e2 := netip.ParseAddr(d.PoolEnd)
+	if e1 != nil || e2 != nil || !a.Is4() || !b.Is4() {
+		return 0, 0, fmt.Errorf("pool_start and pool_end must be IPv4 addresses")
+	}
+	first, last := lan.Masked().Addr().Next(), lastAddr(lan).Prev()
+	if !lan.Contains(a) || !lan.Contains(b) || a.Less(first) || last.Less(b) {
+		return 0, 0, fmt.Errorf("pool %s - %s must lie within %s - %s", a, b, first, last)
+	}
+	if b.Less(a) {
+		return 0, 0, fmt.Errorf("pool_end %s is before pool_start %s", b, a)
+	}
+	if r := lan.Addr(); !r.Less(a) && !b.Less(r) {
+		return 0, 0, fmt.Errorf("the pool %s - %s contains the router address %s", a, b, r)
+	}
+	off = addrOffset(lan, a)
+	return off, addrOffset(lan, b) - off + 1, nil
 }
 
 func lastAddr(p netip.Prefix) netip.Addr {
@@ -255,11 +278,8 @@ func (n *Network) validate(ctx netCtx) (warnings, problems []string) {
 	}
 	d := l.DHCPServer
 	if d.Enabled && lanOK {
-		hosts := 1<<(32-lanNet.Bits()) - 2
-		if d.PoolOffset < 1 || d.PoolSize < 1 || d.PoolOffset+d.PoolSize-1 > hosts {
-			bad("network.lan.dhcp_server: pool must fit in %s (offsets 1..%d)", lanNet.Masked(), hosts)
-		} else if o := addrOffset(lanNet, lanNet.Addr()); o >= d.PoolOffset && o < d.PoolOffset+d.PoolSize {
-			bad("network.lan.dhcp_server: the pool contains the router address %s", lanNet.Addr())
+		if _, _, err := poolRange(lanNet, d); err != nil {
+			bad("network.lan.dhcp_server: %v", err)
 		}
 		if d.LeaseTime < 60 || d.LeaseTime > 7*86400 {
 			bad("network.lan.dhcp_server.lease_time: 60..604800 s")
@@ -402,8 +422,10 @@ func RenderNetwork(c *Config, bridge, cfgPath string) map[string]string {
 	switch {
 	case n.router() && l.DHCPServer.Enabled:
 		d := l.DHCPServer
+		lanNet, _ := parseHost(l.Address)
+		off, size, _ := poolRange(lanNet, d) // validated before rendering
 		fmt.Fprintf(&s, "\n[DHCPServer]\nPoolOffset=%d\nPoolSize=%d\nDefaultLeaseTimeSec=%d\nMaxLeaseTimeSec=%d\nEmitRouter=yes\nEmitDNS=yes\n",
-			d.PoolOffset, d.PoolSize, d.LeaseTime, d.LeaseTime)
+			off, size, d.LeaseTime, d.LeaseTime)
 		if len(d.DNS) > 0 {
 			fmt.Fprintf(&s, "DNS=%s\n", strings.Join(d.DNS, " "))
 		} else if w.Interface != "" {
@@ -518,6 +540,14 @@ func planNetwork(want *Config, run *Running, o PlanOpts) []Cmd {
 		sort.Strings(reconf)
 		for _, i := range reconf {
 			cmds = append(cmds, cmdIgn("networkctl", "reconfigure", i))
+		}
+	}
+	// Leaving router mode: networkd turns forwarding and masquerading on but
+	// does not undo either when the setting goes away.
+	if strings.Contains(st.Files[unitLAN], "IPMasquerade=") && !strings.Contains(desired[unitLAN], "IPMasquerade=") {
+		cmds = append(cmds, cmdIgn("sysctl", "-w", "net.ipv4.conf.all.forwarding=0"))
+		if st.NFT {
+			cmds = append(cmds, cmdIgn("nft", "flush", "set", "ip", "io.systemd.nat", "masq_saddr"))
 		}
 	}
 	if st.NFT {

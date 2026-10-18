@@ -454,9 +454,12 @@ function takeNet() {
 function bindInput(e) {
   const el = e.target; if (!el.dataset.path) return;
   if (el.dataset.path.startsWith("network.") && !takeNet()) return;
+  const oldLan = el.dataset.path === "network.lan.address" ? S.draft.network.lan.address : null;
   let v = el.type === "checkbox" ? el.checked : el.dataset.type === "int" ? parseInt(el.value, 10) || 0
     : el.dataset.type === "list" ? el.value.split(/[\s,;]+/).filter(Boolean) : el.value;
   setPath(el.dataset.path, v);
+  if (oldLan !== null) movePool(oldLan, v);
+  if (/^network\.lan\.dhcp_server\.pool_/.test(el.dataset.path)) { const n = $("#pool-note"); if (n) n.textContent = poolNote(); }
   // auto and 1000full always negotiate
   const sp = /^ports\.([^.]+)\.speed$/.exec(el.dataset.path);
   if (sp && (v === "auto" || v === "1000full")) S.draft.ports[sp[1]].autoneg = true;
@@ -868,6 +871,25 @@ function cidrInfo(s) {
   return { ip, bits, base: (ip & mask) >>> 0, hosts: 2 ** (32 - bits) - 2 };
 }
 const ipStr = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+const ipNum = (s) => { const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s || ""); return m && m.slice(1).every((x) => +x <= 255) ? ((+m[1] << 24) | (+m[2] << 16) | (+m[3] << 8) | +m[4]) >>> 0 : null; };
+function poolNote() {
+  const l = (S.draft.network || S.net?.suggested)?.lan, ci = cidrInfo(l?.address); if (!ci) return "";
+  const d = l.dhcp_server, pLo = ipNum(d.pool_start), pHi = ipNum(d.pool_end);
+  return pLo === null || pHi === null ? "неверный адрес"
+    : pLo < ci.base + 1 || pHi > ci.base + ci.hosts ? `вне подсети ${ipStr(ci.base + 1)} – ${ipStr(ci.base + ci.hosts)}`
+    : pHi < pLo ? "конец раньше начала"
+    : ci.ip >= pLo && ci.ip <= pHi ? `содержит адрес роутера ${ipStr(ci.ip)}`
+    : `всего ${pHi - pLo + 1}`;
+}
+// When the LAN subnet changes, carry the DHCP pool over at the same offsets.
+function movePool(oldCidr, newCidr) {
+  const d = S.draft.network?.lan?.dhcp_server, a = cidrInfo(oldCidr), b = cidrInfo(newCidr);
+  if (!d || !a || !b || a.base === b.base) return;
+  const lo = ipNum(d.pool_start), hi = ipNum(d.pool_end);
+  if (lo === null || hi === null || lo < a.base || hi > a.base + a.hosts) return;
+  d.pool_start = ipStr(b.base + Math.min(lo - a.base, b.hosts));
+  d.pool_end = ipStr(b.base + Math.min(hi - a.base, b.hosts));
+}
 const ifStatus = (name) => (S.net?.interfaces || []).find((i) => i.name === name);
 function ifLive(name) {
   const s = ifStatus(name);
@@ -897,7 +919,7 @@ function viewNet() {
   if (shadow) n = net.suggested;
   const r = n.mode === "router", w = n.wan, l = n.lan, d = l.dhcp_server, f = n.firewall;
   const ci = cidrInfo(l.address);
-  const range = ci && d.pool_size > 0 ? `${ipStr(ci.base + d.pool_offset)} – ${ipStr(ci.base + d.pool_offset + d.pool_size - 1)}` : "—";
+
   const nft = net.nft_available;
   const modeBtn = (m, t, s) => `<label class="pt" style="cursor:pointer;min-width:220px;${n.mode === m ? "border-color:var(--accent)" : ""}"><div class="n"><input type="radio" name="n-mode" data-path="network.mode" data-rerender="1" value="${m}" ${n.mode === m ? "checked" : ""}> ${t}</div><div class="s">${s}</div></label>`;
   let h = shadow ? `<div class="warnbox" style="margin-bottom:12px">Сейчас адресами управляет netplan (WAN и br0 по DHCP). Ниже — те же настройки; первое изменение передаст управление сетью демону. На плате ничего не меняется до «Применить».</div>` : "";
@@ -922,7 +944,7 @@ function viewNet() {
   if (!r) h += `<div class="note" style="margin:4px 0 8px">Настройки ниже действуют только в режиме «Роутер». Их можно заполнить заранее.</div><div style="opacity:.6">`;
   h += `<div class="card"><h2>DHCP-сервер LAN<span class="spacer"></span>${sw(`data-path="network.lan.dhcp_server.enabled" data-rerender="1"`, d.enabled)}</h2>
     ${d.enabled ? `<div class="body"><div class="form">
-      <label>Пул адресов</label><div class="row">с <input type="number" min="1" data-type="int" data-path="network.lan.dhcp_server.pool_offset" value="${d.pool_offset}" data-rerender="1"> адресов <input type="number" min="1" data-type="int" data-path="network.lan.dhcp_server.pool_size" value="${d.pool_size}" data-rerender="1"> <span class="mono">${range}</span></div>
+      <label>Диапазон адресов</label><div class="row">с ${inp("network.lan.dhcp_server.pool_start", d.pool_start, ci ? ipStr(ci.base + 100) : "192.168.1.100", 140, 'class="mono"')} по ${inp("network.lan.dhcp_server.pool_end", d.pool_end, ci ? ipStr(ci.base + 199) : "192.168.1.199", 140, 'class="mono"')} <span class="note" id="pool-note">${esc(poolNote())}</span></div>
       <label>Срок аренды, с</label><div><input type="number" min="60" data-type="int" data-path="network.lan.dhcp_server.lease_time" value="${d.lease_time}"> <span class="note">${Math.round(d.lease_time / 360) / 10} ч</span></div>
       <label>DNS для клиентов</label><div>${listInp("network.lan.dhcp_server.dns", d.dns, "как у WAN")}</div></div></div>
       <div class="body" style="border-top:1px solid var(--line);padding-bottom:6px"><b>Закреплённые адреса</b></div>

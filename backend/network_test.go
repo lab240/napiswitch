@@ -97,6 +97,33 @@ func TestRenderFirewall(t *testing.T) {
 	}
 }
 
+func TestPoolRange(t *testing.T) {
+	lan := netip.MustParsePrefix("192.168.1.1/24")
+	for _, c := range []struct {
+		start, end string
+		off, size  int
+		err        string
+	}{
+		{"192.168.1.100", "192.168.1.199", 100, 100, ""},
+		{"192.168.1.2", "192.168.1.254", 2, 253, ""},
+		{"192.168.1.50", "192.168.1.50", 50, 1, ""},
+		{"192.168.1.0", "192.168.1.10", 0, 0, "must lie within"},
+		{"192.168.1.10", "192.168.1.255", 0, 0, "must lie within"},
+		{"192.168.2.10", "192.168.2.20", 0, 0, "must lie within"},
+		{"192.168.1.20", "192.168.1.10", 0, 0, "before pool_start"},
+		{"192.168.1.1", "192.168.1.10", 0, 0, "router address"},
+		{"", "192.168.1.10", 0, 0, "IPv4 addresses"},
+	} {
+		off, size, err := poolRange(lan, DHCPServer{PoolStart: c.start, PoolEnd: c.end})
+		if c.err == "" && (err != nil || off != c.off || size != c.size) {
+			t.Errorf("%s-%s: got %d,%d,%v want %d,%d", c.start, c.end, off, size, err, c.off, c.size)
+		}
+		if c.err != "" && (err == nil || !strings.Contains(err.Error(), c.err)) {
+			t.Errorf("%s-%s: error %v, want %q", c.start, c.end, err, c.err)
+		}
+	}
+}
+
 func TestValidateNetwork(t *testing.T) {
 	ctx := netCtx{Candidates: []string{"enx00e04c680026"}, WebPort: 8080, NFT: true}
 	ok := netConfig("router").Network
@@ -107,7 +134,7 @@ func TestValidateNetwork(t *testing.T) {
 	n := netConfig("router").Network
 	n.WAN.Interface = "eth9"
 	n.LAN.Address = "192.168.30.1/24"
-	n.LAN.DHCPServer.PoolOffset = 1 // contains .1, the router
+	n.LAN.DHCPServer.PoolStart, n.LAN.DHCPServer.PoolEnd = "192.168.30.1", "192.168.30.50" // contains .1, the router
 	n.LAN.DHCPServer.StaticLeases = []StaticLease{{MAC: "01:00:5e:00:00:01", Address: "10.1.1.1"}}
 	n.Firewall.WANAllow = []string{"ssh", "telnet"}
 	n.Firewall.PortForwards = []PortForward{{Proto: "tcp", WANPort: 22, Dest: "192.168.30.5"}, {Proto: "icmp", WANPort: 1, Dest: "8.8.8.8"}}
@@ -185,10 +212,11 @@ func TestPlanNetwork(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("router:\n%s", strings.Join(got, "\n"))
 	}
-	// Back to switch mode: firewall table removed.
+	// Back to switch mode: firewall table removed, forwarding and masquerading undone.
 	rf := RenderNetwork(r, "br0", "cfg")
 	got = strs(planNetwork(c, netRunning(rf, RenderFirewall(r.Network, 8080)), netOpts))
-	if !slices.Contains(got, "nft delete table inet napi_switchd") || !slices.Contains(got, "rm -f /run/napi-switch/firewall.nft") {
+	if !slices.Contains(got, "nft delete table inet napi_switchd") || !slices.Contains(got, "rm -f /run/napi-switch/firewall.nft") ||
+		!slices.Contains(got, "sysctl -w net.ipv4.conf.all.forwarding=0") || !slices.Contains(got, "nft flush set ip io.systemd.nat masq_saddr") {
 		t.Fatalf("router -> switch:\n%s", strings.Join(got, "\n"))
 	}
 	// WAN moved to another NIC: both the old and the new one are reconfigured.
