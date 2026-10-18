@@ -305,6 +305,12 @@ func (n *Network) validate(ctx netCtx) (warnings, problems []string) {
 				bad("static lease %s: name up to 32 printable characters", s.MAC)
 			}
 		}
+		// systemd-networkd (257) matches static leases by client identifier
+		// 01:<MAC>. Clients that send a DUID instead (systemd-networkd itself,
+		// some NAS/IoT firmware) are not matched - and get no answer at all.
+		if len(d.StaticLeases) > 0 {
+			warn("static leases work only for clients identifying by MAC (Windows, Android, dhclient); a client sending a DUID (e.g. Linux with systemd-networkd) gets no address while it has a static lease - give it a static IP instead")
+		}
 		if len(ctx.LinkPorts) > 0 {
 			warn("DHCP server will answer on %s (link up): make sure no other network is connected there", strings.Join(ctx.LinkPorts, ", "))
 		}
