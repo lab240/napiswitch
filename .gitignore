@@ -1,0 +1,6 @@
+# build output
+backend/napi-switchd
+backend/deploy/napi-switchd
+# vendor documentation (datasheets) and internal notes are kept locally
+docs/
+napi-switch-problems.md

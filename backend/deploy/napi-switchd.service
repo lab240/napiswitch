@@ -1,0 +1,14 @@
+[Unit]
+Description=NAPI-Switch management backend (REST API)
+# The bridge and its ports come from netplan/networkd; the daemon waits for
+# them (up to 90 s), then reapplies the saved config.
+After=systemd-networkd.service
+Wants=systemd-networkd.service
+
+[Service]
+ExecStart=/usr/local/sbin/napi-switchd -listen :8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

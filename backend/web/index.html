@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAPI-Switch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='4' width='14' height='8' rx='1.5' fill='%232563eb'/%3E%3Crect x='3' y='7' width='2' height='2' fill='white'/%3E%3Crect x='7' y='7' width='2' height='2' fill='white'/%3E%3Crect x='11' y='7' width='2' height='2' fill='white'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --panel2: #f9fafb; --text: #1b1f24; --muted: #646d78;
+  --line: #dde1e6; --accent: #2563eb; --accent-text: #ffffff; --ok: #16a34a; --warn: #d97706;
+  --bad: #dc2626; --off: #9aa3ad; --chip: #eef1f4; --shadow: 0 1px 2px rgba(0,0,0,.06);
+  --dirty: #fff7e0; --dirty-line: #f0c050;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --panel: #1a1e24; --panel2: #20252c; --text: #e6e9ed; --muted: #98a1ab;
+    --line: #2e343c; --accent: #4f8cff; --accent-text: #0b0e12; --ok: #3fbf6a; --warn: #f0a33a;
+    --bad: #f05252; --off: #5d6670; --chip: #262c34; --shadow: none; --dirty: #3a3018; --dirty-line: #8a6d1e;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --panel: #1a1e24; --panel2: #20252c; --text: #e6e9ed; --muted: #98a1ab;
+  --line: #2e343c; --accent: #4f8cff; --accent-text: #0b0e12; --ok: #3fbf6a; --warn: #f0a33a;
+  --bad: #f05252; --off: #5d6670; --chip: #262c34; --shadow: none; --dirty: #3a3018; --dirty-line: #8a6d1e;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+a { color: var(--accent); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 16px; }
+header { background: var(--panel); border-bottom: 1px solid var(--line); }
+header .wrap { display: flex; align-items: center; gap: 16px; padding-top: 10px; padding-bottom: 10px; flex-wrap: wrap; }
+.brand { font-weight: 650; font-size: 16px; }
+.brand small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+.hstat { display: flex; gap: 14px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+.hstat b { color: var(--text); font-weight: 550; }
+.spacer { flex: 1; }
+nav { background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+nav .wrap { display: flex; gap: 2px; overflow-x: auto; }
+nav button { background: none; border: 0; padding: 10px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+main { padding: 16px 0 120px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); margin-bottom: 16px; }
+.card > h2 { margin: 0; font-size: 14px; font-weight: 650; padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.card > h2 .spacer { flex: 1; }
+.card .body { padding: 14px; }
+.note { color: var(--muted); font-size: 13px; }
+.warnbox { background: var(--dirty); border: 1px solid var(--dirty-line); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+th { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--panel2); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+input[type=text], input[type=number], input[type=password], select {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 4px 7px; min-height: 30px; }
+input[type=number] { width: 84px; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:disabled, select:disabled { opacity: .5; }
+.btn { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; min-height: 30px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.btn.danger { color: var(--bad); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.sm { padding: 2px 8px; min-height: 26px; font-size: 13px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--off); margin-right: 6px; vertical-align: 0; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--chip); font-size: 12px; }
+.chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
+.sw { position: relative; display: inline-block; width: 34px; height: 20px; vertical-align: middle; }
+.sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+.sw span { position: absolute; inset: 0; background: var(--off); border-radius: 10px; cursor: pointer; transition: background .15s; }
+.sw span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; background: #fff; border-radius: 50%; transition: transform .15s; }
+.sw input:checked + span { background: var(--ok); }
+.sw input:checked + span::after { transform: translateX(14px); }
+.sw input:disabled + span { opacity: .4; cursor: default; }
+.sw input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.form { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; align-items: center; }
+.form label { color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
+.kv div:nth-child(odd) { color: var(--muted); }
+.panel-front { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px; }
+.pt { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-width: 112px; background: var(--panel2); cursor: pointer; }
+.pt:hover { border-color: var(--muted); }
+.pt .n { font-weight: 650; display: flex; align-items: center; }
+.pt .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.pt .d { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.cell-sel { min-width: 64px; }
+.cell-u { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.cell-t { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+td.dirty, .dirty-mark { box-shadow: inset 3px 0 0 var(--dirty-line); }
+#bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: none; }
+#bar .wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
+#bar.show { display: block; }
+#bar.draft { background: var(--panel); border-top: 2px solid var(--dirty-line); box-shadow: 0 -4px 14px rgba(0,0,0,.12); }
+#bar.pending { background: var(--dirty); border-top: 2px solid var(--warn); box-shadow: 0 -4px 14px rgba(0,0,0,.12); }
+#bar .big { font-weight: 650; }
+#toasts { position: fixed; right: 16px; top: 16px; z-index: 40; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 32px)); }
+.toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 10px 12px; box-shadow: 0 4px 14px rgba(0,0,0,.15); white-space: pre-wrap; word-break: break-word; }
+.toast.bad { border-left-color: var(--bad); } .toast.ok { border-left-color: var(--ok); }
+dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); padding: 0; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog .dh { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 650; }
+dialog .db { padding: 14px; overflow: auto; max-height: calc(100vh - 180px); }
+dialog .df { padding: 10px 14px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
+pre.cmds { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 0; overflow-x: auto; font-size: 12.5px; }
+#login { max-width: 420px; margin: 12vh auto; padding: 0 16px; }
+#login .card .body { display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hidden { display: none !important; }
+@media (max-width: 640px) {
+  .form { grid-template-columns: 1fr; gap: 4px 0; }
+  .form label { margin-top: 6px; }
+  .hstat { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="login" class="hidden">
+  <div class="card">
+    <h2>NAPI-Switch: вход</h2>
+    <div class="body">
+      <div class="note">Токен API лежит на устройстве в <span class="mono">/etc/napi-switch/token</span>.</div>
+      <input id="tok" type="password" placeholder="Токен" autocomplete="current-password">
+      <div class="row"><button class="btn primary" id="tokgo">Войти</button><span id="tokerr" class="note"></span></div>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+<header><div class="wrap">
+  <div class="brand" id="h-name">NAPI-Switch<small></small></div>
+  <div class="hstat" id="h-stat"></div>
+  <div class="spacer"></div>
+  <span id="h-saved"></span>
+  <button class="btn sm" id="h-save" title="Записать применённую конфигурацию, чтобы она действовала после перезагрузки">Сохранить</button>
+  <button class="btn sm" id="h-out">Выйти</button>
+</div></header>
+<nav><div class="wrap" id="tabs"></div></nav>
+<main><div class="wrap" id="view"></div></main>
+</div>
+
+<div id="bar"><div class="wrap" id="barin"></div></div>
+<div id="toasts"></div>
+<dialog id="dlg"><div class="dh"><span id="dlg-t"></span><span class="spacer"></span><button class="btn sm" data-close>✕</button></div><div class="db" id="dlg-b"></div><div class="df" id="dlg-f"></div></dialog>
+
+<script>
+"use strict";
+const API = "/api/v1";
+const TABS = [
+  ["ports", "Порты"], ["vlan", "VLAN"], ["net", "Сеть"], ["stp", "STP"], ["fdb", "MAC-таблица"],
+  ["mcast", "Мультикаст"], ["mirror", "Зеркалирование"], ["system", "Система"], ["log", "Журнал"],
+];
+const SPEED_LABEL = { auto: "Авто", "1000full": "1000 полный", "100full": "100 полный", "100half": "100 полу", "10full": "10 полный", "10half": "10 полу" };
+const STP_LABEL = { forwarding: ["ok", "пересылка"], blocking: ["warn", "блокировка"], listening: ["warn", "прослушивание"], learning: ["warn", "обучение"], disabled: ["", "выключен"] };
+
+const S = { token: "", caps: null, sys: null, ports: [], view: null, draft: null, tab: "ports", offset: 0, stp: null, fdb: null, mcast: null, events: [], counters: null, applyConfirm: 60, applySave: true, fdbFilter: { port: "", vlan: "", type: "" } };
+
+// ---------- helpers ----------
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+  set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} },
+};
+function toast(msg, kind = "") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.textContent = msg;
+  $("#toasts").append(t);
+  setTimeout(() => t.remove(), kind === "bad" ? 9000 : 4000);
+}
+function fmtUptime(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + " д " : "") + h + " ч " + m + " мин";
+}
+function fmtNum(n) { return (n ?? 0).toLocaleString("ru-RU"); }
+function fmtBytes(n) {
+  n = n || 0;
+  const u = ["Б", "КБ", "МБ", "ГБ", "ТБ"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(1) : n) + " " + u[i];
+}
+const sw = (attrs, on, disabled) => `<label class="sw"><input type="checkbox" ${attrs} ${on ? "checked" : ""} ${disabled ? "disabled" : ""}><span></span></label>`;
+
+class HTTPError extends Error {
+  constructor(status, data) { super(data?.error || ("HTTP " + status)); this.status = status; this.data = data || {}; }
+}
+async function api(method, path, body) {
+  const opt = { method, headers: { Authorization: "Bearer " + S.token } };
+  if (body !== undefined) { opt.body = JSON.stringify(body); opt.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(API + path, opt);
+  const date = r.headers.get("Date");
+  if (date) S.offset = new Date(date).getTime() - Date.now();
+  let data = null;
+  try { data = await r.json(); } catch {}
+  if (r.status === 401) { showLogin("Токен не подошёл"); throw new HTTPError(401, data); }
+  if (!r.ok) throw new HTTPError(r.status, data);
+  return data;
+}
+function showErr(e) {
+  if (!(e instanceof HTTPError)) { toast("Нет связи с устройством: " + e.message, "bad"); return; }
+  const d = e.data;
+  if (d.problems) {
+    openDialog("Конфигурация не прошла проверку", `<ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`);
+  } else if (d.apply_error) {
+    const a = d.apply_error;
+    openDialog("Ошибка применения", `<p>Команда завершилась ошибкой${a.restored ? ", предыдущая конфигурация восстановлена" : ""}.</p><pre class="cmds">${esc(a.command)}\n${esc(a.error)}</pre>`);
+  } else toast(d.error || e.message, "bad");
+}
+
+// ---------- dialog ----------
+function openDialog(title, html, buttons = []) {
+  const dl = $("#dlg");
+  $("#dlg-t").textContent = title;
+  $("#dlg-b").innerHTML = html;
+  const f = $("#dlg-f"); f.innerHTML = "";
+  for (const [label, cls, fn] of [...buttons, ["Закрыть", "", null]]) {
+    const b = document.createElement("button");
+    b.className = "btn " + cls; b.textContent = label;
+    b.onclick = async () => { if (fn) { if (await fn() === false) return; } dl.close(); };
+    f.append(b);
+  }
+  if (!dl.open) dl.showModal();
+}
+$("#dlg").addEventListener("click", (e) => { if (e.target.closest("[data-close]") || e.target === $("#dlg")) $("#dlg").close(); });
+$("#dlg").addEventListener("close", () => { S.counters = null; });
+
+// ---------- login ----------
+function showLogin(msg) {
+  $("#app").classList.add("hidden"); $("#bar").classList.remove("show");
+  $("#login").classList.remove("hidden"); $("#tokerr").textContent = msg || "";
+  $("#tok").focus();
+}
+async function tryLogin(tok) {
+  S.token = tok;
+  try { await api("GET", "/system"); } catch (e) { if (!(e instanceof HTTPError) || e.status !== 401) $("#tokerr").textContent = "Нет связи с устройством"; return false; }
+  store.set("napi-token", tok);
+  $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
+  await boot();
+  return true;
+}
+$("#tokgo").onclick = () => tryLogin($("#tok").value.trim());
+$("#tok").addEventListener("keydown", (e) => { if (e.key === "Enter") tryLogin($("#tok").value.trim()); });
+$("#h-out").onclick = () => { store.set("napi-token", ""); S.token = ""; showLogin(); };
+
+// ---------- data ----------
+const applied = () => S.view?.applied;
+const dirty = () => S.draft && applied() && JSON.stringify(S.draft) !== JSON.stringify(applied());
+const portView = (n) => S.ports.find((p) => p.name === n);
+const portNames = () => Object.keys(S.draft?.ports || {}).sort();
+const bridgedNames = () => portNames().filter((n) => portView(n)?.bridged);
+
+async function loadView() {
+  const wasDirty = dirty();
+  S.view = await api("GET", "/config");
+  if (!S.draft || !wasDirty) S.draft = clone(S.view.applied);
+}
+async function loadStatus() {
+  const [sys, ports] = await Promise.all([api("GET", "/system"), api("GET", "/ports")]);
+  S.sys = sys; S.ports = ports;
+}
+async function loadTabData() {
+  if (S.tab === "stp") S.stp = await api("GET", "/stp");
+  if (S.tab === "fdb") {
+    const q = new URLSearchParams(Object.entries(S.fdbFilter).filter(([, v]) => v)).toString();
+    S.fdb = await api("GET", "/fdb" + (q ? "?" + q : ""));
+  }
+  if (S.tab === "mcast") S.mcast = await api("GET", "/multicast");
+  if (S.tab === "log") S.events = await api("GET", "/events");
+  if (S.tab === "net") S.net = await api("GET", "/network");
+}
+async function boot() {
+  try {
+    S.caps = await api("GET", "/capabilities");
+    await Promise.all([loadView(), loadStatus()]);
+    await loadTabData();
+  } catch (e) { showErr(e); }
+  renderTabs(); render(); renderHeader(); renderBar();
+}
+let polling = false;
+async function poll() {
+  if (polling || !S.token || $("#app").classList.contains("hidden")) return;
+  polling = true;
+  try {
+    const before = JSON.stringify(applied());
+    await Promise.all([loadView(), loadStatus(), loadTabData()]);
+    renderHeader(); renderBar();
+    if (JSON.stringify(applied()) !== before && !dirty()) render(); else updateLive();
+  } catch (e) { if (!(e instanceof HTTPError)) { $("#h-saved").innerHTML = `<span class="chip bad">нет связи</span>`; } }
+  polling = false;
+}
+setInterval(poll, 4000);
+
+// ---------- header / tabs ----------
+function renderHeader() {
+  const s = S.sys; if (!s) return;
+  $("#h-name").innerHTML = `${esc(s.name || s.hostname)}<small>${esc(s.model)}</small>`;
+  const t = s.temperatures_c?.length ? Math.max(...s.temperatures_c).toFixed(0) + " °C" : "—";
+  const cpu = s.cpu_port || {};
+  const crc = (cpu.rx_crc_errors || 0) + (cpu.switch_rx_crc_errors || 0);
+  const up = S.ports.filter((p) => p.link?.up).length;
+  $("#h-stat").innerHTML = `<span>Работает <b>${fmtUptime(s.uptime_s)}</b></span><span>Темп. <b>${t}</b></span>`
+    + `<span>Линк <b>${up}/${S.ports.length}</b></span>`
+    + `<span title="Ошибки CRC на канале процессор↔свитч (RMII), нарастающим итогом">Канал CPU: <b class="${crc ? "" : ""}">${crc ? fmtNum(crc) + " CRC" : "без ошибок"}</b></span>`;
+  const v = S.view;
+  $("#h-saved").innerHTML = !v ? "" : v.pending ? `<span class="chip warn">ждёт подтверждения</span>`
+    : v.unsaved_changes ? `<span class="chip warn" title="Применённая конфигурация отличается от сохранённой и пропадёт после перезагрузки">не сохранено</span>`
+    : `<span class="chip ok">сохранено</span>`;
+  $("#h-save").disabled = !v || !v.unsaved_changes || !!v.pending;
+}
+$("#h-save").onclick = async () => {
+  try { await api("POST", "/config/save"); toast("Конфигурация сохранена: она будет действовать после перезагрузки", "ok"); await loadView(); renderHeader(); }
+  catch (e) { showErr(e); }
+};
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join("");
+}
+$("#tabs").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-tab]"); if (!b) return;
+  S.tab = b.dataset.tab; store.set("napi-tab", S.tab);
+  renderTabs(); render();
+  try { await loadTabData(); render(); } catch (er) { showErr(er); }
+});
+
+// ---------- bottom bar: draft / pending ----------
+let barTimer = null;
+function renderBar() {
+  const bar = $("#bar"), v = S.view;
+  clearInterval(barTimer);
+  if (v?.pending) {
+    bar.className = "show pending";
+    const tick = () => {
+      const left = Math.max(0, Math.round((new Date(v.pending.deadline).getTime() - (Date.now() + S.offset)) / 1000));
+      $("#barin").innerHTML = `<span class="big">Изменения применены, но не подтверждены.</span>`
+        + `<span>Если не подтвердить, через <b>${left} с</b> устройство само вернёт прежнюю конфигурацию.</span><span class="spacer"></span>`
+        + `<button class="btn primary" id="b-confirm">Подтвердить${v.pending.save ? " и сохранить" : ""}</button><button class="btn danger" id="b-rollback">Откатить сейчас</button>`;
+      $("#b-confirm").onclick = confirmPending; $("#b-rollback").onclick = rollbackPending;
+      if (left === 0) setTimeout(poll, 1500);
+    };
+    tick(); barTimer = setInterval(tick, 1000);
+  } else if (dirty()) {
+    bar.className = "show draft";
+    $("#barin").innerHTML = `<span class="big">Есть неприменённые изменения</span><span class="spacer"></span>`
+      + `<label class="note">Автооткат, если не подтвердить: <select id="b-conf">${[0, 30, 60, 120, 300].map((s) => `<option value="${s}" ${s === S.applyConfirm ? "selected" : ""}>${s ? s + " с" : "без отката"}</option>`).join("")}</select></label>`
+      + `<label class="note"><input type="checkbox" id="b-save" ${S.applySave ? "checked" : ""}> сохранить</label>`
+      + `<button class="btn" id="b-prev">Что изменится</button><button class="btn" id="b-reset">Отменить</button><button class="btn primary" id="b-apply">Применить</button>`;
+    $("#b-conf").onchange = (e) => { S.applyConfirm = +e.target.value; };
+    $("#b-save").onchange = (e) => { S.applySave = e.target.checked; };
+    $("#b-prev").onclick = previewDraft; $("#b-reset").onclick = resetDraft; $("#b-apply").onclick = applyDraft;
+  } else bar.className = "";
+}
+function changed() { renderBar(); markDirty(); }
+async function previewDraft() {
+  try {
+    const r = await api("POST", "/config/preview?mode=replace", S.draft);
+    const w = r.warnings?.length ? `<div class="warnbox">${r.warnings.map(esc).join("<br>")}</div>` : "";
+    const files = Object.entries(r.files || {}).map(([f, c]) => `<details style="margin-top:8px"><summary class="mono">${esc(f)}</summary><pre class="cmds">${esc(c)}</pre></details>`).join("");
+    openDialog("Команды, которые выполнит устройство", w + (r.commands.length ? `<pre class="cmds">${r.commands.map(esc).join("\n")}</pre>${files}` : `<p class="note">Команд нет: изменения касаются только описаний или сохранения.</p>`),
+      [["Применить", "primary", () => { applyDraft(); }]]);
+  } catch (e) { showErr(e); }
+}
+function resetDraft() { S.draft = clone(applied()); render(); renderBar(); }
+async function applyDraft() {
+  const b = $("#b-apply"); if (b) b.disabled = true;
+  try {
+    const q = `?confirm=${S.applyConfirm}${S.applySave ? "&save=1" : ""}`;
+    const r = await api("PUT", "/config" + q, S.draft);
+    if (r.warnings?.length) toast("Предупреждения:\n" + r.warnings.join("\n"));
+    toast(r.pending ? "Применено. Подтвердите изменения внизу экрана." : r.saved_files ? "Применено и сохранено" : "Применено", "ok");
+    S.draft = null;
+  } catch (e) { showErr(e); }
+  await poll().catch(() => {});
+  if (!S.draft) { await loadView(); }
+  render(); renderHeader(); renderBar();
+}
+async function confirmPending() {
+  try { const r = await api("POST", "/config/confirm"); toast(r?.saved_files ? "Подтверждено и сохранено" : "Подтверждено", "ok"); }
+  catch (e) { showErr(e); }
+  await loadView(); renderHeader(); renderBar(); render();
+}
+async function rollbackPending() {
+  try { await api("POST", "/config/rollback"); toast("Изменения откачены", "ok"); }
+  catch (e) { showErr(e); }
+  S.draft = null; await loadView(); await loadStatus(); renderHeader(); renderBar(); render();
+}
+
+// ---------- rendering ----------
+function render() {
+  const v = $("#view");
+  if (!S.draft) { v.innerHTML = `<p class="note">Загрузка…</p>`; return; }
+  const f = { ports: viewPorts, vlan: viewVLAN, net: viewNet, stp: viewSTP, fdb: viewFDB, mcast: viewMcast, mirror: viewMirror, system: viewSystem, log: viewLog }[S.tab];
+  v.innerHTML = f();
+  markDirty();
+}
+// Highlight inputs whose value differs from the applied config.
+function markDirty() {
+  const a = applied(); if (!a) return;
+  document.querySelectorAll("#view [data-path]").forEach((el) => {
+    const p = el.dataset.path.split(".");
+    const get = (o) => p.reduce((x, k) => x?.[k], o);
+    const td = el.closest("td") || el.closest(".fld") || el;
+    td.classList.toggle("dirty", JSON.stringify(get(S.draft)) !== JSON.stringify(get(a)));
+  });
+}
+function setPath(path, val) {
+  const p = path.split("."); let o = S.draft;
+  for (const k of p.slice(0, -1)) o = o[k];
+  o[p.at(-1)] = val;
+}
+// Generic binding: inputs with data-path edit the draft.
+$("#view").addEventListener("input", (e) => {
+  const el = e.target; if (!el.dataset.path) return;
+  let v = el.type === "checkbox" ? el.checked : el.dataset.type === "int" ? parseInt(el.value, 10) || 0
+    : el.dataset.type === "list" ? el.value.split(/[\s,;]+/).filter(Boolean) : el.value;
+  setPath(el.dataset.path, v);
+  if (el.dataset.rerender) render();
+  changed();
+});
+
+function linkCell(p) {
+  const l = p?.link || {};
+  if (!p) return "—";
+  if (!p.enabled) return `<span class="dot"></span><span class="note">выключен</span>`;
+  if (!l.up) return `<span class="dot bad"></span><span class="note">нет линка</span>`;
+  const sqi = l.sqi_max > 0 ? ` <span class="chip ${l.sqi < l.sqi_max - 2 ? "warn" : ""}" title="Качество сигнала в кабеле">SQI ${l.sqi}/${l.sqi_max}</span>` : "";
+  return `<span class="dot ok"></span>${l.speed} ${l.duplex === "full" ? "полный" : "полу"}${sqi}`;
+}
+function stpCell(p) {
+  if (!p?.bridged) return `<span class="note">вне моста</span>`;
+  if (!S.draft.bridge.stp.enabled) return `<span class="note">STP выкл.</span>`;
+  const [c, t] = STP_LABEL[p.stp_state] || ["", p.stp_state || "—"];
+  return `<span class="chip ${c}">${esc(t)}</span>`;
+}
+function updateLive() {
+  for (const p of S.ports) {
+    const a = document.getElementById("lk-" + p.name); if (a) a.innerHTML = linkCell(p);
+    const b = document.getElementById("st-" + p.name); if (b) b.innerHTML = stpCell(p);
+    const c = document.getElementById("fp-" + p.name); if (c) c.outerHTML = frontPort(p);
+  }
+  if (S.tab === "stp") { const el = $("#stp-live"); if (el) el.innerHTML = stpLive(); }
+  if (S.tab === "fdb") { const el = $("#fdb-live"); if (el) el.innerHTML = fdbLive(); }
+  if (S.tab === "mcast") { const el = $("#mc-live"); if (el) el.innerHTML = mcastLive(); }
+  if (S.tab === "log") { $("#view").innerHTML = viewLog(); }
+  if (S.tab === "system") { const el = $("#sys-live"); if (el) el.innerHTML = sysLive(); }
+  if (S.tab === "net" && S.draft.network) {
+    const a = $("#n-wan-live"); if (a) a.innerHTML = ifLive(S.draft.network.wan.interface);
+    const b = $("#n-lan-live"); if (b) b.innerHTML = ifLive("br0");
+    const c = $("#n-leases"); if (c) c.innerHTML = leasesLive();
+  }
+  if (S.counters) refreshCounters();
+}
+
+// ---------- ports ----------
+function frontPort(p) {
+  const d = S.draft.ports[p.name];
+  const cls = !p.enabled ? "" : p.link?.up ? "ok" : "bad";
+  const s = !p.enabled ? "выключен" : p.link?.up ? `${p.link.speed} Мбит/с` : "нет линка";
+  return `<div class="pt" id="fp-${esc(p.name)}" data-counters="${esc(p.name)}" title="Счётчики порта"><div class="n"><span class="dot ${cls}"></span>${esc(p.name)}</div><div class="s">${s}</div><div class="d">${esc(d?.description || "")}&nbsp;</div></div>`;
+}
+function viewPorts() {
+  const rows = portNames().map((n) => {
+    const d = S.draft.ports[n], p = portView(n), br = p?.bridged;
+    const caps = S.caps?.ports?.[n] || {};
+    const speeds = ["auto", ...(caps.speeds || [])];
+    const base = `ports.${n}.`;
+    return `<tr>
+      <td><b>${esc(n)}</b></td>
+      <td>${sw(`data-path="${base}enabled"`, d.enabled)}</td>
+      <td id="lk-${esc(n)}">${linkCell(p)}</td>
+      <td><input type="text" data-path="${base}description" value="${esc(d.description)}" maxlength="64" placeholder="—" style="width:170px"></td>
+      <td><select data-path="${base}speed" ${caps.copper ? "" : "disabled"}>${speeds.map((s) => `<option value="${s}" ${d.speed === s ? "selected" : ""}>${SPEED_LABEL[s] || s}</option>`).join("")}</select></td>
+      <td title="Выключенный autoneg задаёт скорость жёстко; для 1000 нужен autoneg">${sw(`data-path="${base}autoneg"`, d.autoneg, !caps.copper || d.speed === "auto")}</td>
+      <td id="st-${esc(n)}">${stpCell(p)}</td>
+      <td>${sw(`data-path="${base}learning"`, d.learning, !br)}</td>
+      <td title="Изолированные порты не обмениваются трафиком друг с другом, только с неизолированными">${sw(`data-path="${base}isolated"`, d.isolated, !br)}</td>
+      <td><input type="number" min="0" max="65535" data-type="int" data-path="${base}stp_cost" value="${d.stp_cost}" ${br ? "" : "disabled"} title="0 = не задавать (авто по скорости)"></td>
+      <td><input type="number" min="0" max="63" data-type="int" data-path="${base}stp_priority" value="${d.stp_priority}" ${br ? "" : "disabled"} style="width:64px"></td>
+      <td><button class="btn sm" data-counters="${esc(n)}">Счётчики</button></td>
+    </tr>`;
+  }).join("");
+  return `<div class="card"><h2>Передняя панель</h2><div class="panel-front">${S.ports.map(frontPort).join("")}</div></div>
+  <div class="card"><h2>Порты<span class="spacer"></span><span class="note">Изменённые поля отмечены жёлтой полосой</span></h2><div class="scroll"><table>
+    <thead><tr><th>Порт</th><th>Вкл</th><th>Линк</th><th>Описание</th><th>Скорость</th><th>Autoneg</th><th>STP</th><th>Обучение MAC</th><th>Изоляция</th><th>Стоимость STP</th><th>Приор. STP</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+}
+$("#view").addEventListener("change", (e) => {
+  // speed=auto forces autoneg on; re-render to update the toggle
+  const el = e.target;
+  if (el.dataset.path?.endsWith(".speed")) {
+    const n = el.dataset.path.split(".")[1];
+    if (el.value === "auto" || el.value === "1000full") S.draft.ports[n].autoneg = true;
+    render(); changed();
+  }
+});
+
+// ---------- counters ----------
+async function refreshCounters() {
+  const n = S.counters; if (!n) return;
+  try {
+    const c = await api("GET", `/ports/${encodeURIComponent(n)}/counters`);
+    if (S.counters !== n) return;
+    const s = c.summary;
+    const row = (l, rx, tx) => `<tr><td>${l}</td><td class="num">${rx}</td><td class="num">${tx}</td></tr>`;
+    const errs = s.rx_errors + s.tx_errors;
+    $("#dlg-b").innerHTML = `<table><thead><tr><th></th><th class="num">Приём</th><th class="num">Передача</th></tr></thead><tbody>
+      ${row("Байты", fmtBytes(s.rx_bytes), fmtBytes(s.tx_bytes))}
+      ${row("Unicast", fmtNum(s.rx_unicast), fmtNum(s.tx_unicast))}
+      ${row("Multicast", fmtNum(s.rx_multicast), fmtNum(s.tx_multicast))}
+      ${row("Broadcast", fmtNum(s.rx_broadcast), fmtNum(s.tx_broadcast))}
+      ${row(`<span class="${errs ? "chip bad" : ""}">Ошибки</span>`, fmtNum(s.rx_errors), fmtNum(s.tx_errors))}
+      ${row("Отброшено", fmtNum(s.rx_discards), fmtNum(s.tx_discards))}
+      ${row("Pause", fmtNum(s.rx_pause), fmtNum(s.tx_pause))}
+      ${row("Коллизии", "", fmtNum(s.collisions))}
+      </tbody></table>
+      <details style="margin-top:12px"><summary class="note">Все счётчики MIB</summary><table class="mono">${Object.keys(c.mib).sort().map((k) => `<tr><td>${esc(k)}</td><td class="num">${fmtNum(c.mib[k])}</td></tr>`).join("")}</table></details>`;
+  } catch (e) { showErr(e); }
+}
+$("#view").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-counters]"); if (!b) return;
+  const n = b.dataset.counters;
+  S.counters = n;
+  openDialog(`Счётчики ${n}`, `<p class="note">Загрузка…</p>`, [["Сбросить", "danger", async () => {
+    try { await api("POST", `/ports/${encodeURIComponent(n)}/counters/clear`); S.counters = n; await refreshCounters(); } catch (er) { showErr(er); }
+    return false;
+  }]]);
+  S.counters = n;
+  refreshCounters();
+});
+
+// ---------- VLAN ----------
+function viewVLAN() {
+  const c = S.draft, names = bridgedNames(), aware = c.bridge.vlan_aware;
+  const head = names.map((n) => `<th>${esc(n)}</th>`).join("");
+  const rows = c.vlans.map((v, i) => {
+    const cells = names.map((n) => {
+      const p = c.ports[n];
+      const st = p.pvid === v.id ? "u" : p.tagged.includes(v.id) ? "t" : "";
+      return `<td class="${st ? "cell-" + st : ""}"><select class="cell-sel" data-vcell="${esc(n)}" data-vid="${v.id}">
+        <option value="" ${!st ? "selected" : ""}>—</option><option value="u" ${st === "u" ? "selected" : ""}>U (PVID)</option><option value="t" ${st === "t" ? "selected" : ""}>T</option></select></td>`;
+    }).join("");
+    const mgmt = c.bridge.mgmt_vlan === v.id;
+    return `<tr><td class="mono"><b>${v.id}</b></td><td><input type="text" data-path="vlans.${i}.name" value="${esc(v.name)}" placeholder="—" style="width:130px"></td>${cells}
+      <td>${mgmt ? `<span class="chip">управление</span>` : `<button class="btn sm danger" data-vdel="${v.id}">Удалить</button>`}</td></tr>`;
+  }).join("");
+  return `<div class="card"><h2>Режим</h2><div class="body"><div class="form">
+    <label>VLAN 802.1Q</label><div class="fld" data-path="bridge.vlan_aware">${sw(`data-path="bridge.vlan_aware" data-rerender="1"`, aware)} <span class="note">${aware ? "Порты работают по таблице ниже." : "Выключено: все порты в одном сегменте. Таблица ниже сохраняется и начнёт действовать после включения."}</span></div>
+    <label>VLAN управления</label><div><select data-path="bridge.mgmt_vlan" data-type="int">${c.vlans.map((v) => `<option value="${v.id}" ${v.id === c.bridge.mgmt_vlan ? "selected" : ""}>${v.id}${v.name ? " — " + esc(v.name) : ""}</option>`).join("")}</select>
+      <span class="note">В этом VLAN доступен адрес коммутатора (br0). Поменять его можно, только если управление придёт через порт с этим VLAN.</span></div>
+  </div></div></div>
+  <div class="card"><h2>Членство портов<span class="spacer"></span><span class="note">U — без тега (PVID, access), T — с тегом (trunk)</span></h2>
+    <div class="body" style="padding-bottom:0">${aware ? "" : `<div class="warnbox">Режим 802.1Q выключен: таблица не действует.</div>`}
+    <div class="note" style="margin-bottom:8px">У порта может быть только один VLAN без тега. Выбор U в другой строке переносит PVID.</div></div>
+    <div class="scroll"><table><thead><tr><th>VID</th><th>Имя</th>${head}<th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="body row" style="border-top:1px solid var(--line)">
+      <input type="number" id="v-id" min="1" max="4094" placeholder="VID"><input type="text" id="v-name" placeholder="Имя" style="width:150px">
+      <button class="btn" id="v-add">Добавить VLAN</button>
+      <span class="note">VLAN, отличающиеся на 128 (например 1 и 129), делят одну MAC-таблицу в чипе.</span>
+    </div></div>`;
+}
+$("#view").addEventListener("change", (e) => {
+  const el = e.target; if (!el.dataset.vcell) return;
+  const p = S.draft.ports[el.dataset.vcell], vid = +el.dataset.vid;
+  p.tagged = p.tagged.filter((x) => x !== vid);
+  if (p.pvid === vid) p.pvid = 0;
+  if (el.value === "u") p.pvid = vid;
+  if (el.value === "t") p.tagged = [...p.tagged, vid].sort((a, b) => a - b);
+  render(); changed();
+});
+$("#view").addEventListener("click", (e) => {
+  if (e.target.id === "v-add") {
+    const id = parseInt($("#v-id").value, 10), name = $("#v-name").value.trim();
+    if (!(id >= 1 && id <= 4094)) { toast("VID должен быть от 1 до 4094", "bad"); return; }
+    if (S.draft.vlans.some((v) => v.id === id)) { toast(`VLAN ${id} уже есть`, "bad"); return; }
+    S.draft.vlans.push({ id, name }); S.draft.vlans.sort((a, b) => a.id - b.id);
+    render(); changed();
+  }
+  const d = e.target.closest("[data-vdel]");
+  if (d) {
+    const id = +d.dataset.vdel;
+    S.draft.vlans = S.draft.vlans.filter((v) => v.id !== id);
+    for (const p of Object.values(S.draft.ports)) { p.tagged = p.tagged.filter((x) => x !== id); if (p.pvid === id) p.pvid = 0; }
+    S.draft.static_fdb = S.draft.static_fdb.filter((f) => f.vlan !== id);
+    render(); changed();
+  }
+});
+
+// ---------- STP ----------
+function stpLive() {
+  const s = S.stp; if (!s) return `<p class="note">Загрузка…</p>`;
+  return `<div class="kv">
+    <div>Статус</div><div>${s.enabled ? (s.is_root ? `<span class="chip ok">этот коммутатор — корень</span>` : `<span class="chip">не корень</span>`) : `<span class="chip">выключен</span>`}${s.topology_change ? ` <span class="chip warn">смена топологии</span>` : ""}</div>
+    <div>ID моста</div><div class="mono">${esc(s.bridge_id)}</div>
+    <div>ID корня</div><div class="mono">${esc(s.root_id)}</div>
+    <div>Корневой порт</div><div>${esc(s.root_port || "—")}</div>
+    <div>Стоимость пути до корня</div><div>${s.root_path_cost}</div>
+  </div>
+  <table style="margin-top:12px"><thead><tr><th>Порт</th><th>Состояние</th><th class="num">Стоимость</th><th class="num">Приоритет</th></tr></thead><tbody>
+  ${(s.ports || []).map((p) => `<tr><td>${esc(p.port)}</td><td>${stpCell({ bridged: true, stp_state: p.state })}</td><td class="num">${p.cost}</td><td class="num">${p.priority}</td></tr>`).join("")}</tbody></table>`;
+}
+function viewSTP() {
+  const b = S.draft.bridge, st = b.stp;
+  const prio = []; for (let i = 0; i <= 61440; i += 4096) prio.push(i);
+  return `<div class="grid2"><div class="card"><h2>Настройки</h2><div class="body"><div class="form">
+    <label>STP (802.1D)</label><div class="fld" data-path="bridge.stp.enabled">${sw(`data-path="bridge.stp.enabled"`, st.enabled)}</div>
+    <label>Приоритет моста</label><div><select data-path="bridge.stp.priority" data-type="int">${prio.map((p) => `<option ${p === st.priority ? "selected" : ""}>${p}</option>`).join("")}</select> <span class="note">меньше — больше шансов стать корнем</span></div>
+    <label>Hello time, с</label><div><input type="number" min="1" max="10" data-type="int" data-path="bridge.stp.hello_time" value="${st.hello_time}"></div>
+    <label>Forward delay, с</label><div><input type="number" min="4" max="30" data-type="int" data-path="bridge.stp.forward_delay" value="${st.forward_delay}"></div>
+    <label>Max age, с</label><div><input type="number" min="6" max="40" data-type="int" data-path="bridge.stp.max_age" value="${st.max_age}"></div>
+    <label>Время жизни MAC, с</label><div><input type="number" min="10" max="1000000" data-type="int" data-path="bridge.ageing_time" value="${b.ageing_time}"></div>
+  </div><p class="note">Таймеры должны удовлетворять 2×(forward delay − 1) ≥ max age ≥ 2×(hello + 1). Стоимость и приоритет портов — на вкладке «Порты». RSTP/MSTP драйвер пока не поддерживает.</p></div></div>
+  <div class="card"><h2>Состояние</h2><div class="body" id="stp-live">${stpLive()}</div></div></div>`;
+}
+
+// ---------- FDB ----------
+function fdbLive() {
+  const f = S.fdb; if (!f) return `<p class="note">Загрузка…</p>`;
+  if (!f.entries.length) return `<p class="note" style="padding:14px">Записей нет.</p>`;
+  return `<table><thead><tr><th>MAC</th><th>Порт</th><th>VLAN</th><th>Тип</th><th>В чипе</th></tr></thead><tbody>
+    ${f.entries.map((e) => `<tr><td class="mono">${esc(e.mac)}</td><td>${esc(e.port)}</td><td>${e.vlan || "—"}</td><td>${e.type === "static" ? `<span class="chip">статическая</span>` : e.type === "local" ? `<span class="note">адрес порта</span>` : "динамическая"}</td><td>${e.offloaded ? "да" : "—"}</td></tr>`).join("")}</tbody></table>`;
+}
+function viewFDB() {
+  const f = S.fdbFilter, c = S.draft, names = bridgedNames();
+  const opt = (list, cur, all) => `<option value="">${all}</option>` + list.map((x) => `<option ${String(x) === cur ? "selected" : ""}>${esc(x)}</option>`).join("");
+  const st = c.static_fdb.map((e, i) => `<tr><td class="mono">${esc(e.mac)}</td><td>${esc(e.port)}</td><td>${e.vlan || "—"}</td><td><button class="btn sm danger" data-fdel="${i}">Удалить</button></td></tr>`).join("");
+  return `<div class="card"><h2>MAC-таблица<span class="spacer"></span>
+      <select id="ff-port">${opt(names, f.port, "все порты")}</select>
+      <select id="ff-vlan">${opt(c.vlans.map((v) => v.id), f.vlan, "все VLAN")}</select>
+      <select id="ff-type"><option value="">все типы</option><option value="dynamic" ${f.type === "dynamic" ? "selected" : ""}>динамические</option><option value="static" ${f.type === "static" ? "selected" : ""}>статические</option></select>
+      <button class="btn sm danger" id="f-flush">Очистить динамические</button></h2>
+    <div class="scroll" id="fdb-live">${fdbLive()}</div></div>
+  <div class="card"><h2>Статические записи</h2>
+    ${st ? `<div class="scroll"><table><thead><tr><th>MAC</th><th>Порт</th><th>VLAN</th><th></th></tr></thead><tbody>${st}</tbody></table></div>` : `<div class="body note">Нет статических записей.</div>`}
+    <div class="body row" style="border-top:1px solid var(--line)">
+      <input type="text" id="fs-mac" placeholder="00:11:22:33:44:55" class="mono" style="width:170px">
+      <select id="fs-port">${names.map((n) => `<option>${esc(n)}</option>`).join("")}</select>
+      ${c.bridge.vlan_aware ? `<select id="fs-vlan">${c.vlans.map((v) => `<option>${v.id}</option>`).join("")}</select>` : ""}
+      <button class="btn" id="fs-add">Добавить</button><span class="note">Применяется вместе с остальными изменениями.</span>
+    </div></div>`;
+}
+$("#view").addEventListener("change", async (e) => {
+  const m = { "ff-port": "port", "ff-vlan": "vlan", "ff-type": "type" }[e.target.id]; if (!m) return;
+  S.fdbFilter[m] = e.target.value;
+  try { await loadTabData(); $("#fdb-live").innerHTML = fdbLive(); } catch (er) { showErr(er); }
+});
+$("#view").addEventListener("click", async (e) => {
+  if (e.target.id === "f-flush") {
+    const port = S.fdbFilter.port;
+    openDialog("Очистить MAC-таблицу", `<p>Удалить динамические записи ${port ? "порта " + esc(port) : "на всех портах"}? Коммутатор выучит адреса заново.</p>`, [["Очистить", "danger", async () => {
+      try { await api("DELETE", "/fdb" + (port ? "?port=" + encodeURIComponent(port) : "")); toast("MAC-таблица очищена", "ok"); await loadTabData(); $("#fdb-live").innerHTML = fdbLive(); } catch (er) { showErr(er); }
+    }]]);
+  }
+  if (e.target.id === "fs-add") {
+    const mac = $("#fs-mac").value.trim().toLowerCase().replace(/-/g, ":");
+    if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) { toast("MAC в формате 00:11:22:33:44:55", "bad"); return; }
+    const vlan = $("#fs-vlan") ? +$("#fs-vlan").value : 0;
+    S.draft.static_fdb.push({ mac, port: $("#fs-port").value, vlan });
+    render(); changed();
+  }
+  const d = e.target.closest("[data-fdel]");
+  if (d) { S.draft.static_fdb.splice(+d.dataset.fdel, 1); render(); changed(); }
+});
+
+// ---------- multicast ----------
+function mcastLive() {
+  const m = S.mcast; if (!m) return `<p class="note">Загрузка…</p>`;
+  const groups = [];
+  for (const x of m.mdb || []) for (const g of x.mdb || []) groups.push(g);
+  if (!groups.length) return `<p class="note" style="padding:14px">Групп нет.</p>`;
+  return `<table><thead><tr><th>Группа</th><th>Порт</th><th>VLAN</th><th>Тип</th></tr></thead><tbody>
+    ${groups.map((g) => `<tr><td class="mono">${esc(g.grp)}</td><td>${esc(g.port)}</td><td>${g.vid || "—"}</td><td>${esc(g.state)}</td></tr>`).join("")}</tbody></table>`;
+}
+function viewMcast() {
+  const i = S.draft.bridge.igmp;
+  return `<div class="card"><h2>IGMP</h2><div class="body"><div class="form">
+    <label>IGMP snooping</label><div class="fld" data-path="bridge.igmp.snooping">${sw(`data-path="bridge.igmp.snooping"`, i.snooping)} <span class="note">мультикаст уходит только на порты, где есть подписчики</span></div>
+    <label>Querier</label><div class="fld" data-path="bridge.igmp.querier">${sw(`data-path="bridge.igmp.querier"`, i.querier)} <span class="note">включайте, если в сети нет маршрутизатора с IGMP</span></div>
+  </div></div></div>
+  <div class="card"><h2>Группы</h2><div class="scroll" id="mc-live">${mcastLive()}</div></div>`;
+}
+
+// ---------- mirror ----------
+function viewMirror() {
+  const m = S.draft.mirror, names = bridgedNames();
+  const on = !!m;
+  const dirOf = (n) => m?.sources.find((s) => s.port === n)?.direction || "";
+  const rows = names.filter((n) => !on || n !== m.dest).map((n) => `<tr><td>${esc(n)}</td><td><select data-msrc="${esc(n)}" ${on ? "" : "disabled"}>
+      ${[["", "—"], ["rx", "приём"], ["tx", "передача"], ["both", "приём и передача"]].map(([v, l]) => `<option value="${v}" ${dirOf(n) === v ? "selected" : ""}>${l}</option>`).join("")}</select></td></tr>`).join("");
+  return `<div class="card"><h2>Зеркалирование портов</h2><div class="body"><div class="form">
+    <label>Зеркалирование</label><div>${sw(`id="m-on"`, on)} <span class="note">одна сессия, копирует сам чип, процессор не нагружается</span></div>
+    <label>Порт анализатора</label><div><select id="m-dest" ${on ? "" : "disabled"}>${names.map((n) => `<option ${m?.dest === n ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></div>
+  </div></div>
+  <table><thead><tr><th>Источник</th><th>Что копировать</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+$("#view").addEventListener("change", (e) => {
+  const el = e.target, names = bridgedNames();
+  if (el.id === "m-on") {
+    S.draft.mirror = el.checked ? { dest: names.at(-1), sources: [] } : null;
+    render(); changed();
+  } else if (el.id === "m-dest") {
+    S.draft.mirror.dest = el.value;
+    S.draft.mirror.sources = S.draft.mirror.sources.filter((s) => s.port !== el.value);
+    render(); changed();
+  } else if (el.dataset.msrc) {
+    const m = S.draft.mirror, n = el.dataset.msrc;
+    m.sources = m.sources.filter((s) => s.port !== n);
+    if (el.value) m.sources.push({ port: n, direction: el.value });
+    m.sources.sort((a, b) => a.port.localeCompare(b.port));
+    changed();
+  }
+});
+
+// ---------- network (WAN / LAN / router) ----------
+function cidrInfo(s) {
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(s || ""); if (!m) return null;
+  const ip = ((+m[1] << 24) | (+m[2] << 16) | (+m[3] << 8) | +m[4]) >>> 0, bits = +m[5];
+  if (bits < 8 || bits > 30) return null;
+  const mask = bits ? (0xffffffff << (32 - bits)) >>> 0 : 0;
+  return { ip, bits, base: (ip & mask) >>> 0, hosts: 2 ** (32 - bits) - 2 };
+}
+const ipStr = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+const ifStatus = (name) => (S.net?.interfaces || []).find((i) => i.name === name);
+function ifLive(name) {
+  const s = ifStatus(name);
+  if (!s) return `<span class="note">нет данных</span>`;
+  const st = s.state === "routable" ? "ok" : s.state === "no-carrier" || s.state === "off" ? "bad" : "warn";
+  return `<div class="kv">
+    <div>Состояние</div><div><span class="dot ${st}"></span>${esc(s.state || "—")}</div>
+    <div>Адреса</div><div class="mono">${s.addresses.map(esc).join(", ") || "—"}${s.dhcp ? ` <span class="chip">DHCP</span>` : ""}</div>
+    <div>Шлюз</div><div class="mono">${esc(s.gateway || "—")}</div>
+    <div>DNS</div><div class="mono">${s.dns.map(esc).join(", ") || "—"}</div>
+    <div>MAC</div><div class="mono">${esc(s.mac)}</div>
+    <div>Файл networkd</div><div class="mono note" style="white-space:normal">${esc(s.network_file || "—")}</div></div>`;
+}
+function leasesLive() {
+  const l = S.net?.dhcp_leases || [];
+  if (!l.length) return `<p class="note" style="padding:0 14px 14px">Активных аренд нет.</p>`;
+  return `<table><thead><tr><th>Адрес</th><th>MAC</th><th>Имя</th><th>До</th></tr></thead><tbody>${l.map((x) => `<tr><td class="mono">${esc(x.address)}</td><td class="mono">${esc(x.mac)}</td><td>${esc(x.hostname || "—")}</td><td class="note">${x.expires ? new Date(x.expires * 1000).toLocaleString("ru-RU") : "—"}</td></tr>`).join("")}</tbody></table>`;
+}
+const inp = (path, val, ph = "", w = 170, extra = "") => `<input type="text" data-path="${path}" value="${esc(val)}" placeholder="${esc(ph)}" style="width:${w}px" ${extra}>`;
+const listInp = (path, val, ph) => `<input type="text" data-path="${path}" data-type="list" value="${esc((val || []).join(", "))}" placeholder="${esc(ph)}" style="width:240px">`;
+function viewNet() {
+  const n = S.draft.network, net = S.net;
+  if (!net) return `<p class="note">Загрузка…</p>`;
+  if (!n) {
+    return `<div class="card"><h2>Адреса и маршрутизация</h2><div class="body">
+      <p>Сейчас адресами управляет netplan: WAN (${esc(net.wan_candidates.join(", ") || "—")}) и мост br0 получают адреса по DHCP.</p>
+      <p class="note">Если взять управление, демон запишет те же настройки в свои файлы networkd, и дальше их можно менять здесь: статические адреса, режим роутера с NAT, DHCP-сервером, межсетевым экраном и пробросом портов.</p>
+      <button class="btn primary" id="n-take">Взять управление сетью</button></div></div>
+      <div class="grid2">${net.interfaces.map((i) => `<div class="card"><h2>${esc(i.name)}${i.role === "lan" ? ` <span class="chip">мост LAN</span>` : ""}</h2><div class="body">${ifLive(i.name)}</div></div>`).join("")}</div>`;
+  }
+  const r = n.mode === "router", w = n.wan, l = n.lan, d = l.dhcp_server, f = n.firewall;
+  const ci = cidrInfo(l.address);
+  const range = ci && d.pool_size > 0 ? `${ipStr(ci.base + d.pool_offset)} – ${ipStr(ci.base + d.pool_offset + d.pool_size - 1)}` : "—";
+  const nft = net.nft_available;
+  const modeBtn = (m, t, s) => `<label class="pt" style="cursor:pointer;min-width:220px;${n.mode === m ? "border-color:var(--accent)" : ""}"><div class="n"><input type="radio" name="n-mode" data-path="network.mode" data-rerender="1" value="${m}" ${n.mode === m ? "checked" : ""}> ${t}</div><div class="s">${s}</div></label>`;
+  let h = `<div class="card"><h2>Режим</h2><div class="panel-front">
+    ${modeBtn("switch", "Коммутатор", "br0 — обычный клиент сети: адрес по DHCP или статический")}
+    ${modeBtn("router", "Роутер", "порты lan1–lan5 — локальная сеть за NAT, WAN — выход наружу")}</div>
+    ${r ? `<div class="body" style="padding-top:0"><div class="warnbox">В режиме роутера на портах lan1–lan5 работает DHCP-сервер. Убедитесь, что к ним не подключена другая сеть, иначе устройства этой сети начнут получать адреса от коммутатора. Управление остаётся доступным с WAN (${esc(ifStatus(w.interface)?.addresses?.[0] || w.interface)}) и из LAN (${esc(l.address)}).</div></div>` : ""}</div>`;
+  h += `<div class="grid2"><div class="card"><h2>WAN</h2><div class="body"><div class="form">
+    <label>Интерфейс</label><div><select data-path="network.wan.interface" data-rerender="1">${net.wan_candidates.map((x) => `<option ${x === w.interface ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></div>
+    <label>Адрес</label><div><select data-path="network.wan.proto" data-rerender="1"><option value="dhcp" ${w.proto === "dhcp" ? "selected" : ""}>DHCP</option><option value="static" ${w.proto === "static" ? "selected" : ""}>статический</option></select></div>
+    ${w.proto === "static" ? `<label>IP/маска</label><div>${inp("network.wan.address", w.address, "192.0.2.10/24")}</div><label>Шлюз</label><div>${inp("network.wan.gateway", w.gateway, "192.0.2.1")}</div>` : ""}
+    <label>DNS</label><div>${listInp("network.wan.dns", w.dns, w.proto === "dhcp" ? "из DHCP" : "8.8.8.8, 1.1.1.1")}</div>
+  </div></div><div class="body" style="border-top:1px solid var(--line)" id="n-wan-live">${ifLive(w.interface)}</div></div>`;
+  h += `<div class="card"><h2>LAN (мост br0)</h2><div class="body"><div class="form">
+    ${r ? `<label>IP роутера/маска</label><div>${inp("network.lan.address", l.address, "192.168.1.1/24", 170, 'data-rerender="1"')}</div>`
+      : `<label>Адрес</label><div><select data-path="network.lan.proto" data-rerender="1"><option value="dhcp" ${l.proto === "dhcp" ? "selected" : ""}>DHCP</option><option value="static" ${l.proto === "static" ? "selected" : ""}>статический</option></select></div>
+         ${l.proto === "static" ? `<label>IP/маска</label><div>${inp("network.lan.address", l.address, "192.168.30.81/24")}</div><label>Шлюз</label><div>${inp("network.lan.gateway", l.gateway, "необязательно")}</div>` : ""}
+         <label>DNS</label><div>${listInp("network.lan.dns", l.dns, l.proto === "dhcp" ? "из DHCP" : "8.8.8.8")}</div>`}
+  </div></div><div class="body" style="border-top:1px solid var(--line)" id="n-lan-live">${ifLive("br0")}</div></div></div>`;
+  if (!r) return h;
+  h += `<div class="card"><h2>DHCP-сервер LAN<span class="spacer"></span>${sw(`data-path="network.lan.dhcp_server.enabled" data-rerender="1"`, d.enabled)}</h2>
+    ${d.enabled ? `<div class="body"><div class="form">
+      <label>Пул адресов</label><div class="row">с <input type="number" min="1" data-type="int" data-path="network.lan.dhcp_server.pool_offset" value="${d.pool_offset}" data-rerender="1"> адресов <input type="number" min="1" data-type="int" data-path="network.lan.dhcp_server.pool_size" value="${d.pool_size}" data-rerender="1"> <span class="mono">${range}</span></div>
+      <label>Срок аренды, с</label><div><input type="number" min="60" data-type="int" data-path="network.lan.dhcp_server.lease_time" value="${d.lease_time}"> <span class="note">${Math.round(d.lease_time / 360) / 10} ч</span></div>
+      <label>DNS для клиентов</label><div>${listInp("network.lan.dhcp_server.dns", d.dns, "как у WAN")}</div></div></div>
+      <div class="body" style="border-top:1px solid var(--line);padding-bottom:6px"><b>Закреплённые адреса</b></div>
+      ${d.static_leases.length ? `<div class="scroll"><table><thead><tr><th>MAC</th><th>Адрес</th><th>Имя</th><th></th></tr></thead><tbody>${d.static_leases.map((x, i) => `<tr><td class="mono">${esc(x.mac)}</td><td class="mono">${esc(x.address)}</td><td>${esc(x.name)}</td><td><button class="btn sm danger" data-sldel="${i}">Удалить</button></td></tr>`).join("")}</tbody></table></div>` : ""}
+      <div class="body row"><input type="text" id="sl-mac" class="mono" placeholder="00:11:22:33:44:55" style="width:170px"><input type="text" id="sl-ip" class="mono" placeholder="${ci ? ipStr(ci.base + 10) : "192.168.1.10"}" style="width:140px"><input type="text" id="sl-name" placeholder="имя" style="width:120px"><button class="btn" id="sl-add">Закрепить</button></div>
+      <div class="body" style="border-top:1px solid var(--line);padding-bottom:6px"><b>Выданные адреса</b></div><div class="scroll" id="n-leases">${leasesLive()}</div>` : `<div class="body note">Выключен: устройствам в LAN адреса нужно задавать вручную.</div>`}</div>`;
+  const allow = (k, t) => `<label><input type="checkbox" data-allow="${k}" ${f.wan_allow.includes(k) ? "checked" : ""} ${f.enabled ? "" : "disabled"}> ${t}</label>`;
+  h += `<div class="card"><h2>Межсетевой экран WAN<span class="spacer"></span>${sw(`data-path="network.firewall.enabled" data-rerender="1"`, f.enabled)}</h2><div class="body">
+    ${nft ? "" : `<div class="warnbox">На плате не установлен nftables: межсетевой экран и проброс портов сохранятся в конфигурации, но не будут работать, пока не установить пакет (<span class="mono">apt install nftables</span>).</div>`}
+    <p class="note" style="margin-top:0">Включён: с WAN проходят только ответы на соединения из LAN, проброшенные порты и отмеченные службы. Выключен: NAT работает, но вход с WAN не фильтруется.</p>
+    <div class="row">Разрешить с WAN: ${allow("ssh", "SSH (22)")} ${allow("web", `веб-интерфейс (${net.web_port})`)} ${allow("ping", "ping")}</div></div></div>`;
+  h += `<div class="card"><h2>Проброс портов (WAN → LAN)</h2>
+    ${f.port_forwards.length ? `<div class="scroll"><table><thead><tr><th>Имя</th><th>Протокол</th><th class="num">Порт WAN</th><th>Хост LAN</th><th class="num">Порт</th><th></th></tr></thead><tbody>${f.port_forwards.map((x, i) => `<tr><td>${esc(x.name || "—")}</td><td>${x.proto === "both" ? "TCP+UDP" : x.proto.toUpperCase()}</td><td class="num">${x.wan_port}</td><td class="mono">${esc(x.dest)}</td><td class="num">${x.dest_port || x.wan_port}</td><td><button class="btn sm danger" data-pfdel="${i}">Удалить</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="body note">Правил нет. Пример: камера в LAN на 192.168.1.20:554 доступна снаружи по адресу WAN, порт 8554.</div>`}
+    <div class="body row" style="border-top:1px solid var(--line)">
+      <input type="text" id="pf-name" placeholder="имя" style="width:110px">
+      <select id="pf-proto"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="both">TCP+UDP</option></select>
+      <input type="number" id="pf-wan" min="1" max="65535" placeholder="порт WAN">
+      <span>→</span><input type="text" id="pf-dest" class="mono" placeholder="${ci ? ipStr(ci.base + 20) : "192.168.1.20"}" style="width:140px">
+      <input type="number" id="pf-port" min="0" max="65535" placeholder="тот же">
+      <button class="btn" id="pf-add">Добавить</button></div></div>`;
+  return h;
+}
+$("#view").addEventListener("click", (e) => {
+  const t = e.target, n = S.draft?.network;
+  if (t.id === "n-take") { S.draft.network = clone(S.net.suggested); render(); changed(); return; }
+  if (!n) return;
+  if (t.id === "sl-add") {
+    const mac = $("#sl-mac").value.trim().toLowerCase().replace(/-/g, ":"), address = $("#sl-ip").value.trim();
+    if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) { toast("MAC в формате 00:11:22:33:44:55", "bad"); return; }
+    n.lan.dhcp_server.static_leases.push({ mac, address, name: $("#sl-name").value.trim() }); render(); changed();
+  }
+  if (t.id === "pf-add") {
+    const wp = parseInt($("#pf-wan").value, 10);
+    if (!(wp >= 1 && wp <= 65535)) { toast("Порт WAN: 1–65535", "bad"); return; }
+    n.firewall.port_forwards.push({ name: $("#pf-name").value.trim(), proto: $("#pf-proto").value, wan_port: wp, dest: $("#pf-dest").value.trim(), dest_port: parseInt($("#pf-port").value, 10) || 0 });
+    render(); changed();
+  }
+  const sd = t.closest("[data-sldel]"); if (sd) { n.lan.dhcp_server.static_leases.splice(+sd.dataset.sldel, 1); render(); changed(); }
+  const pd = t.closest("[data-pfdel]"); if (pd) { n.firewall.port_forwards.splice(+pd.dataset.pfdel, 1); render(); changed(); }
+});
+$("#view").addEventListener("change", (e) => {
+  const k = e.target.dataset.allow; if (!k) return;
+  const f = S.draft.network.firewall;
+  f.wan_allow = e.target.checked ? [...new Set([...f.wan_allow, k])].sort() : f.wan_allow.filter((x) => x !== k);
+  changed();
+});
+
+// ---------- system ----------
+function sysLive() {
+  const s = S.sys; if (!s) return "";
+  const cpu = s.cpu_port || {};
+  return `<div class="kv">
+    <div>Имя хоста</div><div>${esc(s.hostname)}</div>
+    <div>Модель</div><div>${esc(s.model)}</div>
+    <div>Ядро</div><div class="mono">${esc(s.kernel)}</div>
+    <div>Версия napi-switchd</div><div>${esc(s.daemon_version)}</div>
+    <div>Время работы</div><div>${fmtUptime(s.uptime_s)}</div>
+    <div>Температура</div><div>${(s.temperatures_c || []).map((t) => t.toFixed(1) + " °C").join(", ") || "—"}</div>
+    <div>MAC моста</div><div class="mono">${esc(s.bridge_mac)}</div>
+    <div>Адреса</div><div>${Object.entries(s.addresses || {}).map(([k, v]) => `${esc(k)}: <span class="mono">${v.map(esc).join(", ")}</span>`).join("<br>") || "—"}</div>
+    <div>Канал CPU↔свитч</div><div>${esc(cpu.interface)}: CRC на приёме SoC <b>${fmtNum(cpu.rx_crc_errors)}</b>, CRC на приёме свитча <b>${fmtNum(cpu.switch_rx_crc_errors)}</b>, align <b>${fmtNum(cpu.switch_rx_align_errors)}</b></div>
+  </div>`;
+}
+function viewSystem() {
+  const s = S.draft.system;
+  return `<div class="grid2"><div class="card"><h2>Идентификация</h2><div class="body"><div class="form">
+    <label>Имя устройства</label><div><input type="text" data-path="system.name" value="${esc(s.name)}" style="width:100%"></div>
+    <label>Расположение</label><div><input type="text" data-path="system.location" value="${esc(s.location)}" style="width:100%"></div>
+    <label>Контакт</label><div><input type="text" data-path="system.contact" value="${esc(s.contact)}" style="width:100%"></div>
+  </div></div></div>
+  <div class="card"><h2>Устройство</h2><div class="body" id="sys-live">${sysLive()}</div></div></div>`;
+}
+
+// ---------- log ----------
+function viewLog() {
+  const ev = [...(S.events || [])].reverse();
+  return `<div class="card"><h2>Журнал изменений</h2>${ev.length ? `<div class="scroll"><table><tbody>${ev.map((e) => `<tr><td class="note">${new Date(e.time).toLocaleString("ru-RU")}</td><td style="white-space:normal">${esc(e.message)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="body note">Событий нет.</div>`}</div>`;
+}
+
+// ---------- start ----------
+window.addEventListener("beforeunload", (e) => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } });
+S.tab = TABS.some(([k]) => k === store.get("napi-tab")) ? store.get("napi-tab") : "ports";
+// A link like http://switch:8080/#token=... logs in directly; the fragment
+// never reaches the server and is removed from the address bar at once.
+const hashTok = new URLSearchParams(location.hash.slice(1)).get("token");
+if (hashTok) history.replaceState(null, "", location.pathname);
+const saved = hashTok || store.get("napi-token");
+if (saved) tryLogin(saved).then((ok) => { if (!ok) showLogin(); }); else showLogin();
+</script>
+</body>
+</html>

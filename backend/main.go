@@ -1,0 +1,77 @@
+// napi-switchd: management backend for the NAPI-Switch (KSZ9567 under Linux
+// DSA). It exposes the switch as a REST API for a web UI: ports, VLANs,
+// FDB, STP, IGMP snooping and port mirroring, with commit-confirm apply
+// and persistence through systemd-networkd drop-ins.
+package main
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"flag"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var version = "0.1.0"
+
+func loadToken(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	t := hex.EncodeToString(buf)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return t, os.WriteFile(path, []byte(t+"\n"), 0o600)
+}
+
+func main() {
+	listen := flag.String("listen", ":8080", "HTTP listen address")
+	cfgPath := flag.String("config", "/etc/napi-switch/config.json", "saved config")
+	tokenFile := flag.String("token-file", "/etc/napi-switch/token", "bearer token file (created if missing), empty = no auth")
+	bridge := flag.String("bridge", "br0", "bridge device")
+	netDir := flag.String("netdir", "/etc/systemd/network", "networkd drop-in directory")
+	runNetDir := flag.String("run-netdir", "/run/systemd/network", "runtime networkd directory (applied L3 config)")
+	fwFile := flag.String("fw-file", "/run/napi-switch/firewall.nft", "nft script of the loaded firewall")
+	dry := flag.Bool("dry-run", false, "log commands instead of executing them")
+	flag.Parse()
+
+	l := log.New(os.Stderr, "", 0)
+	token := ""
+	if *tokenFile != "" {
+		var err error
+		if token, err = loadToken(*tokenFile); err != nil {
+			l.Fatalf("token: %v", err)
+		}
+	}
+	paths := Paths{Config: *cfgPath, NetDir: *netDir,
+		NetSearch: []string{*netDir, "/run/systemd/network", "/usr/lib/systemd/network"},
+		RunNetDir: *runNetDir, FWFile: *fwFile}
+	webPort := 0
+	if _, p, err := net.SplitHostPort(*listen); err == nil {
+		webPort, _ = strconv.Atoi(p)
+	}
+	m := NewManager(&sysRunner{log: l, dry: *dry}, l, *bridge, paths, webPort)
+	if err := m.Start(90 * time.Second); err != nil {
+		l.Fatalf("start: %v", err)
+	}
+	api := &API{m: m, token: token, version: version}
+	srv := &http.Server{Addr: *listen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	l.Printf("napi-switchd %s listening on %s", version, *listen)
+	l.Fatal(srv.ListenAndServe())
+}
