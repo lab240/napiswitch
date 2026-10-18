@@ -74,10 +74,12 @@ func TestDisableVLANAwareResetsPorts(t *testing.T) {
 	c := ImportConfig(run)
 	c.Bridge.VLANAware = false
 	got := strs(Plan(c, run, PlanOpts{Bridge: "br0"}))
+	// The reset must come before filtering goes off: the ksz driver does
+	// not program the switch VLAN table while filtering is off.
 	want := []string{
-		"ip link set dev br0 type bridge vlan_filtering 0",
 		"bridge vlan add vid 1 dev lan2 pvid untagged", "bridge vlan del vid 10 dev lan2",
 		"bridge vlan del vid 10 dev lan3",
+		"ip link set dev br0 type bridge vlan_filtering 0",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got:\n%s", strings.Join(got, "\n"))

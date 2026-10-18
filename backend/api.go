@@ -428,7 +428,8 @@ func (a *API) flushFDB(r *http.Request) (any, error) {
 		targets = []string{p}
 	}
 	for _, p := range targets {
-		if err := a.m.r.Exec(cmd("bridge", "link", "set", "dev", p, "flush")); err != nil {
+		// "bridge link set ... flush" is not accepted by iproute2 on the board.
+		if err := a.m.r.Exec(cmd("ip", "link", "set", "dev", p, "type", "bridge_slave", "fdb_flush")); err != nil {
 			return nil, err
 		}
 	}

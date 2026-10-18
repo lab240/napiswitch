@@ -60,9 +60,9 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 	}
 
 	resync := o.ResyncVLANs
-	if wb.VLANAware != rb.VLANAware {
-		cmds = append(cmds, cmd("ip", "link", "set", "dev", br, "type", "bridge", "vlan_filtering", b01(wb.VLANAware)))
-		resync = resync || wb.VLANAware
+	if wb.VLANAware && !rb.VLANAware {
+		cmds = append(cmds, cmd("ip", "link", "set", "dev", br, "type", "bridge", "vlan_filtering", "1"))
+		resync = true
 	}
 
 	if wb.VLANAware {
@@ -81,8 +81,11 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 			cmds = append(cmds, cmdIgn("bridge", "fdb", "add", run.BridgeMAC, "dev", br, "self", "local", "vlan", strconv.Itoa(wb.MgmtVLAN)))
 		}
 	} else if rb.VLANAware {
-		// Leaving 802.1Q mode: reset ports to the bridge default so the
-		// kernel VLAN table does not keep showing the old layout.
+		// Leaving 802.1Q mode: reset ports to the bridge default BEFORE
+		// turning filtering off. The ksz driver only programs the switch
+		// VLAN table while filtering is on, so a reset done afterwards
+		// stays in the kernel only and the hardware keeps the old PVIDs
+		// and memberships (ports cut off from each other).
 		def := []RunVLAN{{ID: 1, PVID: true, Untagged: true}}
 		for _, n := range want.PortNames() {
 			if rp := run.Ports[n]; rp != nil && rp.Master == br {
@@ -90,6 +93,7 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 			}
 		}
 		cmds = append(cmds, planVLANs(br, true, def, run.BridgeVLANs, false)...)
+		cmds = append(cmds, cmd("ip", "link", "set", "dev", br, "type", "bridge", "vlan_filtering", "0"))
 	}
 
 	for _, n := range want.PortNames() {
