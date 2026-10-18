@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -380,18 +381,32 @@ func (a *API) fdb(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := r.URL.Query()
-	type fe struct {
-		MAC  string `json:"mac"`
-		Port string `json:"port"`
-		VLAN int    `json:"vlan"`
-		Type string `json:"type"` // dynamic, static, local
-		HW   bool   `json:"offloaded"`
-	}
-	out := []fe{}
+	return map[string]any{"ageing_time": run.Bridge.AgeingTime,
+		"entries": mergeFDB(ents, run, a.m.bridge, r.URL.Query())}, nil
+}
+
+type fdbEntryView struct {
+	MAC  string `json:"mac"`
+	Port string `json:"port"`
+	VLAN int    `json:"vlan"`
+	Type string `json:"type"`      // dynamic, static, local
+	HW   bool   `json:"offloaded"` // present in the switch chip's table
+}
+
+// mergeFDB combines the bridge's software FDB (entries with master br0)
+// with the switch chip's own table (entries flagged "self" on the ports,
+// from the driver's fdb_dump). Traffic switched port to port never reaches
+// the CPU, so those MACs exist only in the chip table.
+func mergeFDB(ents []fdbJSON, run *Running, bridge string, q url.Values) []fdbEntryView {
+	out := []fdbEntryView{}
+	idx := map[string]int{}
 	for _, e := range ents {
-		if run.Ports[e.Ifname] == nil || e.Master != a.m.bridge {
-			continue // skip local/self entries
+		if run.Ports[e.Ifname] == nil {
+			continue // bridge's own and CPU-port entries
+		}
+		self := slices.Contains(e.Flags, "self") && e.Master == ""
+		if !self && e.Master != bridge {
+			continue
 		}
 		t := "dynamic"
 		switch e.State {
@@ -400,7 +415,19 @@ func (a *API) fdb(r *http.Request) (any, error) {
 		case "permanent":
 			t = "local" // the port's own address
 		}
-		x := fe{strings.ToLower(e.MAC), e.Ifname, e.VLAN, t, slices.Contains(e.Flags, "offload")}
+		vlan := e.VLAN
+		if !run.Bridge.VLANAware {
+			vlan = 0 // the chip reports its default FID as VLAN 1
+		}
+		x := fdbEntryView{strings.ToLower(e.MAC), e.Ifname, vlan, t, self || slices.Contains(e.Flags, "offload")}
+		key := fmt.Sprintf("%s/%s/%d", x.MAC, x.Port, x.VLAN)
+		if i, ok := idx[key]; ok {
+			out[i].HW = out[i].HW || x.HW
+			if out[i].Type == "dynamic" {
+				out[i].Type = x.Type
+			}
+			continue
+		}
 		if p := q.Get("port"); p != "" && p != x.Port {
 			continue
 		}
@@ -410,9 +437,10 @@ func (a *API) fdb(r *http.Request) (any, error) {
 		if t := q.Get("type"); t != "" && t != x.Type {
 			continue
 		}
+		idx[key] = len(out)
 		out = append(out, x)
 	}
-	return map[string]any{"ageing_time": run.Bridge.AgeingTime, "entries": out}, nil
+	return out
 }
 
 func (a *API) flushFDB(r *http.Request) (any, error) {
