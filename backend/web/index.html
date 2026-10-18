@@ -11,18 +11,21 @@
   --line: #dde1e6; --accent: #2563eb; --accent-text: #ffffff; --ok: #16a34a; --warn: #d97706;
   --bad: #dc2626; --off: #9aa3ad; --chip: #eef1f4; --shadow: 0 1px 2px rgba(0,0,0,.06);
   --dirty: #fff7e0; --dirty-line: #f0c050;
+  --chassis: #2b3038; --chassis-text: #e8ebef; --chassis-muted: #a6aeb8; --chassis-hover: #3a414b; --wan: #4ea1ff; --wan-bg: rgba(78,161,255,.10);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #111418; --panel: #1a1e24; --panel2: #20252c; --text: #e6e9ed; --muted: #98a1ab;
     --line: #2e343c; --accent: #4f8cff; --accent-text: #0b0e12; --ok: #3fbf6a; --warn: #f0a33a;
     --bad: #f05252; --off: #5d6670; --chip: #262c34; --shadow: none; --dirty: #3a3018; --dirty-line: #8a6d1e;
+    --chassis: #0c0f13; --chassis-text: #e6e9ed; --chassis-muted: #98a1ab; --chassis-hover: #1c222a; --wan: #58a6ff; --wan-bg: rgba(88,166,255,.10);
   }
 }
 :root[data-theme="dark"] {
   --bg: #111418; --panel: #1a1e24; --panel2: #20252c; --text: #e6e9ed; --muted: #98a1ab;
   --line: #2e343c; --accent: #4f8cff; --accent-text: #0b0e12; --ok: #3fbf6a; --warn: #f0a33a;
   --bad: #f05252; --off: #5d6670; --chip: #262c34; --shadow: none; --dirty: #3a3018; --dirty-line: #8a6d1e;
+    --chassis: #0c0f13; --chassis-text: #e6e9ed; --chassis-muted: #98a1ab; --chassis-hover: #1c222a; --wan: #58a6ff; --wan-bg: rgba(88,166,255,.10);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -84,6 +87,36 @@ input:disabled, select:disabled { opacity: .5; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
 .kv div:nth-child(odd) { color: var(--muted); }
 .panel-front { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px; }
+.chassis { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; padding: 14px; background: var(--chassis); border-radius: 0 0 8px 8px; }
+.chassis .gap { width: 14px; }
+/* WAN is the SoC's own NIC, not a switch port: separate blue block */
+.panels { display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch; }
+.panels > .card:first-child { flex: 1 1 auto; }
+.panels > .card { display: flex; flex-direction: column; }
+.panels > .card > .chassis { flex: 1; }
+.chassis .wanblk { display: flex; flex-direction: column; align-items: center; padding: 2px 6px 4px; border: 2px solid var(--wan); border-radius: 8px; background: var(--wan-bg); }
+.chassis .wanblk .tag { font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--wan); }
+.jack.wan { width: auto; min-width: 150px; }
+.jack.wan .sub { max-width: none; white-space: normal; overflow: visible; }
+.jack.wan .sub.ip { color: var(--chassis-text); font-family: ui-monospace, monospace; font-size: 12px; }
+.jack.wan .sub.mac { font-family: ui-monospace, monospace; }
+.jack { display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: 1px solid transparent; cursor: pointer; padding: 6px 4px 4px; border-radius: 8px; color: var(--chassis-text); width: 92px; }
+.jack:hover { background: var(--chassis-hover); }
+.jack:focus-visible { outline: 2px solid var(--accent); }
+.jack svg { width: 60px; height: 54px; display: block; }
+.jack.off svg { opacity: .45; }
+.jack .lbl { font-weight: 650; font-size: 13px; }
+.jack .sub { font-size: 11px; color: var(--chassis-muted); max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 15px; }
+.jack .sub.warn { color: var(--warn); }
+.legend { display: flex; gap: 14px; padding: 8px 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.led { display: inline-block; width: 10px; height: 6px; border-radius: 1px; margin-right: 5px; vertical-align: 1px; }
+.pd-sec { margin-top: 14px; }
+.pd-sec:first-child { margin-top: 0; }
+.pd-sec h3 { font-size: 13px; margin: 0 0 8px; font-weight: 650; }
+.vtags { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.ptabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: -14px -14px 14px; padding: 0 8px; }
+.ptabs button { background: none; border: 0; padding: 9px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.ptabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 .pt { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-width: 112px; background: var(--panel2); cursor: pointer; }
 .pt:hover { border-color: var(--muted); }
 .pt .n { font-weight: 650; display: flex; align-items: center; }
@@ -229,7 +262,7 @@ function openDialog(title, html, buttons = []) {
   if (!dl.open) dl.showModal();
 }
 $("#dlg").addEventListener("click", (e) => { if (e.target.closest("[data-close]") || e.target === $("#dlg")) $("#dlg").close(); });
-$("#dlg").addEventListener("close", () => { S.counters = null; });
+$("#dlg").addEventListener("close", () => { S.counters = null; S.portDlg = null; });
 
 // ---------- login ----------
 function showLogin(msg) {
@@ -273,7 +306,7 @@ async function loadTabData() {
   }
   if (S.tab === "mcast") S.mcast = await api("GET", "/multicast");
   if (S.tab === "log") S.events = await api("GET", "/events");
-  if (S.tab === "net") S.net = await api("GET", "/network");
+  if (S.tab === "net" || S.tab === "ports") S.net = await api("GET", "/network");
 }
 async function boot() {
   try {
@@ -401,7 +434,7 @@ function render() {
 // Highlight inputs whose value differs from the applied config.
 function markDirty() {
   const a = applied(); if (!a) return;
-  document.querySelectorAll("#view [data-path]").forEach((el) => {
+  document.querySelectorAll("#view [data-path], #dlg-b [data-path]").forEach((el) => {
     const p = el.dataset.path.split(".");
     const get = (o) => p.reduce((x, k) => x?.[k], o);
     const td = el.closest("td") || el.closest(".fld") || el;
@@ -414,14 +447,26 @@ function setPath(path, val) {
   o[p.at(-1)] = val;
 }
 // Generic binding: inputs with data-path edit the draft.
-$("#view").addEventListener("input", (e) => {
+function takeNet() {
+  if (!S.draft.network && S.net) S.draft.network = clone(S.net.suggested);
+  return S.draft.network;
+}
+function bindInput(e) {
   const el = e.target; if (!el.dataset.path) return;
+  if (el.dataset.path.startsWith("network.") && !takeNet()) return;
   let v = el.type === "checkbox" ? el.checked : el.dataset.type === "int" ? parseInt(el.value, 10) || 0
     : el.dataset.type === "list" ? el.value.split(/[\s,;]+/).filter(Boolean) : el.value;
   setPath(el.dataset.path, v);
-  if (el.dataset.rerender) render();
+  // auto and 1000full always negotiate
+  const sp = /^ports\.([^.]+)\.speed$/.exec(el.dataset.path);
+  if (sp && (v === "auto" || v === "1000full")) S.draft.ports[sp[1]].autoneg = true;
+  const inDlg = !!el.closest("#dlg");
+  if (el.dataset.rerender || inDlg) render();
+  if (inDlg && el.dataset.rerender) renderPortDialog();
   changed();
-});
+}
+$("#view").addEventListener("input", bindInput);
+$("#dlg-b").addEventListener("input", bindInput);
 
 function linkCell(p) {
   const l = p?.link || {};
@@ -443,6 +488,7 @@ function updateLive() {
     const b = document.getElementById("st-" + p.name); if (b) b.innerHTML = stpCell(p);
     const c = document.getElementById("fp-" + p.name); if (c) c.outerHTML = frontPort(p);
   }
+  { const c = document.getElementById("fp-wan"); if (c) c.closest(".wanblk").outerHTML = frontWAN(); }
   if (S.tab === "stp") { const el = $("#stp-live"); if (el) el.innerHTML = stpLive(); }
   if (S.tab === "fdb") { const el = $("#fdb-live"); if (el) el.innerHTML = fdbLive(); }
   if (S.tab === "mcast") { const el = $("#mc-live"); if (el) el.innerHTML = mcastLive(); }
@@ -453,15 +499,59 @@ function updateLive() {
     const b = $("#n-lan-live"); if (b) b.innerHTML = ifLive("br0");
     const c = $("#n-leases"); if (c) c.innerHTML = leasesLive();
   }
+  if (S.portDlg) { const st = $("#pd-status"); if (st) st.innerHTML = portStatus(S.portDlg); }
   if (S.counters) refreshCounters();
 }
 
 // ---------- ports ----------
+const LED_LINK = "#22c55e", LED_SPEED = "#f59e0b", LED_OFF = "#4a5059";
+function jackSVG(p, wan) {
+  const up = p.enabled && p.link?.up, g = up ? LED_LINK : LED_OFF, a = up && p.link.speed >= 1000 ? LED_SPEED : LED_OFF;
+  const copper = (S.caps?.ports?.[p.name] || {}).copper !== false;
+  if (!copper) {
+    return `<svg viewBox="0 0 60 54" aria-hidden="true"><rect x="3" y="8" width="54" height="34" rx="3" fill="#9aa3ad"/><rect x="8" y="16" width="44" height="18" rx="2" fill="#15181c"/><rect x="12" y="23" width="36" height="4" fill="#3a3f46"/>
+      <rect x="25" y="46" width="10" height="5" rx="1" fill="${g}"/></svg>`;
+  }
+  const pins = Array.from({ length: 8 }, (_, i) => `<rect x="${15.2 + i * 3.8}" y="13" width="2.2" height="9" fill="#d4a72c"/>`).join("");
+  return `<svg viewBox="0 0 60 54" aria-hidden="true"><rect x="2" y="2" width="56" height="50" rx="4" fill="${wan ? "#4ea1ff" : "#b8bfc7"}"/><rect x="4" y="4" width="52" height="46" rx="3" fill="none" stroke="${wan ? "#2f74c0" : "#8c949d"}" stroke-width="1"/>
+    <path d="M10 10 H50 V38 H40 V45 H20 V38 H10 Z" fill="#15181c"/>${pins}
+    <rect x="6" y="44" width="10" height="5" rx="1" fill="${g}"/><rect x="44" y="44" width="10" height="5" rx="1" fill="${a}"/></svg>`;
+}
+// "1 Гбит/с", "100 Мбит/с"; half duplex is rare enough to spell out.
+function speedText(speed, duplex) {
+  if (!speed) return "линк есть";
+  const t = speed >= 1000 ? `${speed / 1000} Гбит/с` : `${speed} Мбит/с`;
+  return duplex === "half" ? `${t}, полудуплекс` : t;
+}
 function frontPort(p) {
   const d = S.draft.ports[p.name];
-  const cls = !p.enabled ? "" : p.link?.up ? "ok" : "bad";
-  const s = !p.enabled ? "выключен" : p.link?.up ? `${p.link.speed} Мбит/с` : "нет линка";
-  return `<div class="pt" id="fp-${esc(p.name)}" data-counters="${esc(p.name)}" title="Счётчики порта"><div class="n"><span class="dot ${cls}"></span>${esc(p.name)}</div><div class="s">${s}</div><div class="d">${esc(d?.description || "")}&nbsp;</div></div>`;
+  const stpBlk = p.bridged && S.draft.bridge.stp.enabled && p.stp_state === "blocking";
+  const s = !p.enabled ? "выключен" : stpBlk ? "STP блокирует" : p.link?.up ? speedText(p.link.speed, p.link.duplex) : "нет линка";
+  const title = `${p.name}${d?.description ? " — " + d.description : ""}: ${s}. Нажмите, чтобы открыть настройки порта`;
+  return `<button class="jack ${p.enabled ? "" : "off"}" id="fp-${esc(p.name)}" data-port="${esc(p.name)}" title="${esc(title)}">${jackSVG(p)}
+    <span class="lbl">${esc(p.name)}</span><span class="sub ${stpBlk ? "warn" : ""}">${esc(s)}</span><span class="sub">${esc(d?.description || "")}</span></button>`;
+}
+// The WAN NIC (USB) as configured, or the one netplan routes through.
+function wanStatus() {
+  const net = S.net; if (!net) return null;
+  const name = S.draft?.network?.wan?.interface || net.suggested?.wan?.interface;
+  return net.interfaces.find((i) => i.name === name) || null;
+}
+function frontWAN() {
+  const w = wanStatus(); if (!w) return "";
+  const up = w.carrier, svg = jackSVG({ name: w.name, enabled: true, link: { up, speed: 0 } }, true);
+  const ip = ((w.addresses || []).find((a) => !a.includes(":")) || "").split("/")[0];
+  // No speed: the USB 2.0 NIC negotiates 1000 but cannot carry it.
+  const s = up ? "подключён" : "нет линка";
+  const title = `WAN: ${s}${ip ? ", IP " + ip + (w.dhcp ? " (получен по DHCP)" : "") : ""}${w.mac ? ", MAC " + w.mac : ""}. Нажмите, чтобы открыть настройки сети`;
+  return `<div class="wanblk"><button class="jack wan" id="fp-wan" data-wan="1" title="${esc(title)}">${svg}
+    <span class="lbl">WAN</span><span class="sub">${esc(s)}</span>
+    <span class="sub ip">${ip ? "IP " + esc(ip) : "нет IP"}</span></button></div>`;
+}
+function frontPanel() {
+  const copper = S.ports.filter((p) => (S.caps?.ports?.[p.name] || {}).copper !== false), other = S.ports.filter((p) => !copper.includes(p));
+  return `<div class="chassis">${copper.map(frontPort).join("")}${other.length ? `<span class="gap"></span>${other.map(frontPort).join("")}` : ""}</div>
+    <div class="legend"><span><span class="led" style="background:${LED_LINK}"></span>линк</span><span><span class="led" style="background:${LED_SPEED}"></span>1 Гбит/с</span></div>`;
 }
 function viewPorts() {
   const rows = portNames().map((n) => {
@@ -474,30 +564,23 @@ function viewPorts() {
       <td>${sw(`data-path="${base}enabled"`, d.enabled)}</td>
       <td id="lk-${esc(n)}">${linkCell(p)}</td>
       <td><input type="text" data-path="${base}description" value="${esc(d.description)}" maxlength="64" placeholder="—" style="width:170px"></td>
-      <td><select data-path="${base}speed" ${caps.copper ? "" : "disabled"}>${speeds.map((s) => `<option value="${s}" ${d.speed === s ? "selected" : ""}>${SPEED_LABEL[s] || s}</option>`).join("")}</select></td>
+      <td><select data-path="${base}speed" data-rerender="1" ${caps.copper ? "" : "disabled"}>${speeds.map((s) => `<option value="${s}" ${d.speed === s ? "selected" : ""}>${SPEED_LABEL[s] || s}</option>`).join("")}</select></td>
       <td title="Выключенный autoneg задаёт скорость жёстко; для 1000 нужен autoneg">${sw(`data-path="${base}autoneg"`, d.autoneg, !caps.copper || d.speed === "auto")}</td>
       <td id="st-${esc(n)}">${stpCell(p)}</td>
       <td>${sw(`data-path="${base}learning"`, d.learning, !br)}</td>
       <td title="Изолированные порты не обмениваются трафиком друг с другом, только с неизолированными">${sw(`data-path="${base}isolated"`, d.isolated, !br)}</td>
       <td><input type="number" min="0" max="65535" data-type="int" data-path="${base}stp_cost" value="${d.stp_cost}" ${br ? "" : "disabled"} title="0 = не задавать (авто по скорости)"></td>
       <td><input type="number" min="0" max="63" data-type="int" data-path="${base}stp_priority" value="${d.stp_priority}" ${br ? "" : "disabled"} style="width:64px"></td>
-      <td><button class="btn sm" data-counters="${esc(n)}">Счётчики</button></td>
+      <td><button class="btn sm" data-port="${esc(n)}">Подробнее</button></td>
     </tr>`;
   }).join("");
-  return `<div class="card"><h2>Передняя панель</h2><div class="panel-front">${S.ports.map(frontPort).join("")}</div></div>
-  <div class="card"><h2>Порты<span class="spacer"></span><span class="note">Изменённые поля отмечены жёлтой полосой</span></h2><div class="scroll"><table>
+  const wan = frontWAN();
+  return `<div class="panels"><div class="card"><h2>Панель коммутатора</h2>${frontPanel()}</div>${wan ? `<div class="card wancard"><h2>WAN-порт</h2><div class="chassis">${wan}</div></div>` : ""}</div>
+  <div class="card"><h2>Порты коммутатора</h2><div class="scroll"><table>
     <thead><tr><th>Порт</th><th>Вкл</th><th>Линк</th><th>Описание</th><th>Скорость</th><th>Autoneg</th><th>STP</th><th>Обучение MAC</th><th>Изоляция</th><th>Стоимость STP</th><th>Приор. STP</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
 }
-$("#view").addEventListener("change", (e) => {
-  // speed=auto forces autoneg on; re-render to update the toggle
-  const el = e.target;
-  if (el.dataset.path?.endsWith(".speed")) {
-    const n = el.dataset.path.split(".")[1];
-    if (el.value === "auto" || el.value === "1000full") S.draft.ports[n].autoneg = true;
-    render(); changed();
-  }
-});
+
 
 // ---------- counters ----------
 async function refreshCounters() {
@@ -508,7 +591,8 @@ async function refreshCounters() {
     const s = c.summary;
     const row = (l, rx, tx) => `<tr><td>${l}</td><td class="num">${rx}</td><td class="num">${tx}</td></tr>`;
     const errs = s.rx_errors + s.tx_errors;
-    $("#dlg-b").innerHTML = `<table><thead><tr><th></th><th class="num">Приём</th><th class="num">Передача</th></tr></thead><tbody>
+    const box = $("#cnt-box"); if (!box) return;
+    box.innerHTML = `<table><thead><tr><th></th><th class="num">Приём</th><th class="num">Передача</th></tr></thead><tbody>
       ${row("Байты", fmtBytes(s.rx_bytes), fmtBytes(s.tx_bytes))}
       ${row("Unicast", fmtNum(s.rx_unicast), fmtNum(s.tx_unicast))}
       ${row("Multicast", fmtNum(s.rx_multicast), fmtNum(s.tx_multicast))}
@@ -521,16 +605,76 @@ async function refreshCounters() {
       <details style="margin-top:12px"><summary class="note">Все счётчики MIB</summary><table class="mono">${Object.keys(c.mib).sort().map((k) => `<tr><td>${esc(k)}</td><td class="num">${fmtNum(c.mib[k])}</td></tr>`).join("")}</table></details>`;
   } catch (e) { showErr(e); }
 }
+function portStatus(n) {
+  const p = portView(n); if (!p) return "";
+  const l = p.link || {};
+  const vl = (p.vlans_running || []).map((v) => v.id + (v.pvid ? " PVID" : "") + (v.untagged ? " U" : " T")).join(", ");
+  return `<div class="kv">
+    <div>Линк</div><div>${linkCell(p)}</div>
+    <div>Autoneg</div><div>${l.autoneg ? "да" : "нет"}${l.partner_modes?.length ? ` <span class="note">партнёр: ${esc(l.partner_modes.join(", "))}</span>` : ""}</div>
+    <div>STP</div><div>${stpCell(p)}</div>
+    <div>MAC</div><div class="mono">${esc(p.mac)}</div>
+    <div>VLAN в чипе</div><div>${esc(vl || "—")}</div></div>`;
+}
+function portSettings(n) {
+  const d = S.draft.ports[n], p = portView(n), br = p?.bridged, caps = S.caps?.ports?.[n] || {};
+  const base = `ports.${n}.`, c = S.draft;
+  const speeds = ["auto", ...(caps.speeds || [])];
+  let h = `<div class="form">
+    <label>Включён</label><div class="fld" data-path="${base}enabled">${sw(`data-path="${base}enabled"`, d.enabled)}</div>
+    <label>Описание</label><div><input type="text" data-path="${base}description" value="${esc(d.description)}" maxlength="64" placeholder="например, ПЛК шкаф 3" style="width:100%"></div>
+    <label>Скорость</label><div><select data-path="${base}speed" data-rerender="1" ${caps.copper ? "" : "disabled"}>${speeds.map((s) => `<option value="${s}" ${d.speed === s ? "selected" : ""}>${SPEED_LABEL[s] || s}</option>`).join("")}</select></div>
+    <label>Autoneg</label><div class="fld" data-path="${base}autoneg">${sw(`data-path="${base}autoneg"`, d.autoneg, !caps.copper || d.speed === "auto" || d.speed === "1000full")} <span class="note">выкл. — скорость и дуплекс жёстко</span></div>`;
+  if (br) {
+    h += `<label>VLAN без тега (PVID)</label><div><select data-path="${base}pvid" data-type="int" data-rerender="1"><option value="0" ${d.pvid === 0 ? "selected" : ""}>— нет</option>${c.vlans.map((v) => `<option value="${v.id}" ${d.pvid === v.id ? "selected" : ""}>${v.id}${v.name ? " — " + esc(v.name) : ""}</option>`).join("")}</select></div>
+    <label>VLAN с тегом</label><div class="vtags">${c.vlans.filter((v) => v.id !== d.pvid).map((v) => `<label><input type="checkbox" data-vtag="${v.id}" ${d.tagged.includes(v.id) ? "checked" : ""}> ${v.id}${v.name ? " " + esc(v.name) : ""}</label>`).join("") || `<span class="note">других VLAN нет</span>`}</div>
+    ${c.bridge.vlan_aware ? "" : `<span></span><div class="note">Режим 802.1Q выключен: настройки VLAN начнут действовать после его включения на вкладке VLAN.</div>`}
+    <label>Обучение MAC</label><div class="fld" data-path="${base}learning">${sw(`data-path="${base}learning"`, d.learning)}</div>
+    <label>Изоляция</label><div class="fld" data-path="${base}isolated">${sw(`data-path="${base}isolated"`, d.isolated)} <span class="note">не обменивается трафиком с другими изолированными портами</span></div>
+    <label>Стоимость STP</label><div><input type="number" min="0" max="65535" data-type="int" data-path="${base}stp_cost" value="${d.stp_cost}"> <span class="note">0 — по скорости</span></div>
+    <label>Приоритет STP</label><div><input type="number" min="0" max="63" data-type="int" data-path="${base}stp_priority" value="${d.stp_priority}"></div>`;
+  } else {
+    h += `<span></span><div class="note">Порт не входит в мост: VLAN, STP и изоляция недоступны.</div>`;
+  }
+  return h + `</div>`;
+}
+function renderPortDialog() {
+  const n = S.portDlg; if (!n || !$("#dlg").open) return;
+  const st = $("#pd-status"); if (st) st.innerHTML = portStatus(n);
+  const se = $("#pd-set"); if (se) { se.innerHTML = portSettings(n); markDirty(); }
+}
+const PTABS = [["set", "Настройки"], ["status", "Состояние"], ["cnt", "Счётчики"]];
+function openPortDialog(n, tab) {
+  S.portDlg = n;
+  S.portTab = tab || S.portTab || "set";
+  const d = S.draft.ports[n], t = S.portTab;
+  openDialog(`Порт ${n}${d?.description ? " — " + d.description : ""}`, `
+    <div class="ptabs">${PTABS.map(([k, l]) => `<button data-ptab="${k}" class="${t === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div class="${t === "set" ? "" : "hidden"}"><div id="pd-set">${portSettings(n)}</div>
+      <p class="note">Изменения попадают в черновик. «Применить» — применить сразу с автооткатом, если не подтвердить; или закройте окно и продолжайте править.</p></div>
+    <div class="${t === "status" ? "" : "hidden"}"><div id="pd-status">${portStatus(n)}</div></div>
+    <div class="${t === "cnt" ? "" : "hidden"}"><div class="row" style="margin-bottom:10px"><button class="btn sm danger" id="pd-clear">Сбросить счётчики</button></div><div id="cnt-box"><p class="note">Загрузка…</p></div></div>`,
+    [["Применить", "primary", async () => { if (!dirty()) { toast("Изменений нет"); return; } await applyDraft(); }]]);
+  markDirty();
+  S.counters = t === "cnt" ? n : null;
+  if (S.counters) refreshCounters();
+}
+$("#dlg-b").addEventListener("change", (e) => {
+  const el = e.target; if (!el.dataset.vtag || !S.portDlg) return;
+  const p = S.draft.ports[S.portDlg], vid = +el.dataset.vtag;
+  p.tagged = el.checked ? [...new Set([...p.tagged, vid])].sort((a, b) => a - b) : p.tagged.filter((x) => x !== vid);
+  render(); changed();
+});
+$("#dlg-b").addEventListener("click", async (e) => {
+  const pt = e.target.closest("[data-ptab]");
+  if (pt && S.portDlg) { openPortDialog(S.portDlg, pt.dataset.ptab); return; }
+  if (e.target.id !== "pd-clear" || !S.portDlg) return;
+  try { await api("POST", `/ports/${encodeURIComponent(S.portDlg)}/counters/clear`); await refreshCounters(); } catch (er) { showErr(er); }
+});
 $("#view").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-counters]"); if (!b) return;
-  const n = b.dataset.counters;
-  S.counters = n;
-  openDialog(`Счётчики ${n}`, `<p class="note">Загрузка…</p>`, [["Сбросить", "danger", async () => {
-    try { await api("POST", `/ports/${encodeURIComponent(n)}/counters/clear`); S.counters = n; await refreshCounters(); } catch (er) { showErr(er); }
-    return false;
-  }]]);
-  S.counters = n;
-  refreshCounters();
+  if (e.target.closest("[data-wan]")) { $('#tabs [data-tab="net"]').click(); return; }
+  const b = e.target.closest("[data-port]"); if (!b) return;
+  openPortDialog(b.dataset.port);
 });
 
 // ---------- VLAN ----------
@@ -745,21 +889,19 @@ function leasesLive() {
 const inp = (path, val, ph = "", w = 170, extra = "") => `<input type="text" data-path="${path}" value="${esc(val)}" placeholder="${esc(ph)}" style="width:${w}px" ${extra}>`;
 const listInp = (path, val, ph) => `<input type="text" data-path="${path}" data-type="list" value="${esc((val || []).join(", "))}" placeholder="${esc(ph)}" style="width:240px">`;
 function viewNet() {
-  const n = S.draft.network, net = S.net;
+  let n = S.draft.network; const net = S.net;
   if (!net) return `<p class="note">Загрузка…</p>`;
-  if (!n) {
-    return `<div class="card"><h2>Адреса и маршрутизация</h2><div class="body">
-      <p>Сейчас адресами управляет netplan: WAN (${esc(net.wan_candidates.join(", ") || "—")}) и мост br0 получают адреса по DHCP.</p>
-      <p class="note">Если взять управление, демон запишет те же настройки в свои файлы networkd, и дальше их можно менять здесь: статические адреса, режим роутера с NAT, DHCP-сервером, межсетевым экраном и пробросом портов.</p>
-      <button class="btn primary" id="n-take">Взять управление сетью</button></div></div>
-      <div class="grid2">${net.interfaces.map((i) => `<div class="card"><h2>${esc(i.name)}${i.role === "lan" ? ` <span class="chip">мост LAN</span>` : ""}</h2><div class="body">${ifLive(i.name)}</div></div>`).join("")}</div>`;
-  }
+  // Not managed yet: show the suggested config (same as netplan) so every
+  // option is visible; the first edit copies it into the draft (takeNet).
+  const shadow = !n;
+  if (shadow) n = net.suggested;
   const r = n.mode === "router", w = n.wan, l = n.lan, d = l.dhcp_server, f = n.firewall;
   const ci = cidrInfo(l.address);
   const range = ci && d.pool_size > 0 ? `${ipStr(ci.base + d.pool_offset)} – ${ipStr(ci.base + d.pool_offset + d.pool_size - 1)}` : "—";
   const nft = net.nft_available;
   const modeBtn = (m, t, s) => `<label class="pt" style="cursor:pointer;min-width:220px;${n.mode === m ? "border-color:var(--accent)" : ""}"><div class="n"><input type="radio" name="n-mode" data-path="network.mode" data-rerender="1" value="${m}" ${n.mode === m ? "checked" : ""}> ${t}</div><div class="s">${s}</div></label>`;
-  let h = `<div class="card"><h2>Режим</h2><div class="panel-front">
+  let h = shadow ? `<div class="warnbox" style="margin-bottom:12px">Сейчас адресами управляет netplan (WAN и br0 по DHCP). Ниже — те же настройки; первое изменение передаст управление сетью демону. На плате ничего не меняется до «Применить».</div>` : "";
+  h += `<div class="card"><h2>Режим</h2><div class="panel-front">
     ${modeBtn("switch", "Коммутатор", "br0 — обычный клиент сети: адрес по DHCP или статический")}
     ${modeBtn("router", "Роутер", "порты lan1–lan5 — локальная сеть за NAT, WAN — выход наружу")}</div>
     ${r ? `<div class="body" style="padding-top:0"><div class="warnbox">В режиме роутера на портах lan1–lan5 работает DHCP-сервер. Убедитесь, что к ним не подключена другая сеть, иначе устройства этой сети начнут получать адреса от коммутатора. Управление остаётся доступным с WAN (${esc(ifStatus(w.interface)?.addresses?.[0] || w.interface)}) и из LAN (${esc(l.address)}).</div></div>` : ""}</div>`;
@@ -775,7 +917,9 @@ function viewNet() {
          ${l.proto === "static" ? `<label>IP/маска</label><div>${inp("network.lan.address", l.address, "192.168.30.81/24")}</div><label>Шлюз</label><div>${inp("network.lan.gateway", l.gateway, "необязательно")}</div>` : ""}
          <label>DNS</label><div>${listInp("network.lan.dns", l.dns, l.proto === "dhcp" ? "из DHCP" : "8.8.8.8")}</div>`}
   </div></div><div class="body" style="border-top:1px solid var(--line)" id="n-lan-live">${ifLive("br0")}</div></div></div>`;
-  if (!r) return h;
+  // Router-only settings stay visible in switch mode, dimmed: they are kept
+  // in the config and take effect once the mode is switched to router.
+  if (!r) h += `<div class="note" style="margin:4px 0 8px">Настройки ниже действуют только в режиме «Роутер». Их можно заполнить заранее.</div><div style="opacity:.6">`;
   h += `<div class="card"><h2>DHCP-сервер LAN<span class="spacer"></span>${sw(`data-path="network.lan.dhcp_server.enabled" data-rerender="1"`, d.enabled)}</h2>
     ${d.enabled ? `<div class="body"><div class="form">
       <label>Пул адресов</label><div class="row">с <input type="number" min="1" data-type="int" data-path="network.lan.dhcp_server.pool_offset" value="${d.pool_offset}" data-rerender="1"> адресов <input type="number" min="1" data-type="int" data-path="network.lan.dhcp_server.pool_size" value="${d.pool_size}" data-rerender="1"> <span class="mono">${range}</span></div>
@@ -799,12 +943,13 @@ function viewNet() {
       <span>→</span><input type="text" id="pf-dest" class="mono" placeholder="${ci ? ipStr(ci.base + 20) : "192.168.1.20"}" style="width:140px">
       <input type="number" id="pf-port" min="0" max="65535" placeholder="тот же">
       <button class="btn" id="pf-add">Добавить</button></div></div>`;
+  if (!r) h += `</div>`;
   return h;
 }
 $("#view").addEventListener("click", (e) => {
-  const t = e.target, n = S.draft?.network;
-  if (t.id === "n-take") { S.draft.network = clone(S.net.suggested); render(); changed(); return; }
-  if (!n) return;
+  const t = e.target;
+  if (S.tab !== "net" || !(t.id === "sl-add" || t.id === "pf-add" || t.closest("[data-sldel],[data-pfdel]"))) return;
+  const n = takeNet(); if (!n) return;
   if (t.id === "sl-add") {
     const mac = $("#sl-mac").value.trim().toLowerCase().replace(/-/g, ":"), address = $("#sl-ip").value.trim();
     if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) { toast("MAC в формате 00:11:22:33:44:55", "bad"); return; }
@@ -820,7 +965,7 @@ $("#view").addEventListener("click", (e) => {
   const pd = t.closest("[data-pfdel]"); if (pd) { n.firewall.port_forwards.splice(+pd.dataset.pfdel, 1); render(); changed(); }
 });
 $("#view").addEventListener("change", (e) => {
-  const k = e.target.dataset.allow; if (!k) return;
+  const k = e.target.dataset.allow; if (!k || !takeNet()) return;
   const f = S.draft.network.firewall;
   f.wan_allow = e.target.checked ? [...new Set([...f.wan_allow, k])].sort() : f.wan_allow.filter((x) => x !== k);
   changed();

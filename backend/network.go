@@ -600,6 +600,7 @@ func saveNetwork(c *Config, p Paths, bridge string) ([]string, error) {
 type ncLink struct {
 	Name             string `json:"Name"`
 	OperationalState string `json:"OperationalState"`
+	CarrierState     string `json:"CarrierState"`
 	HardwareAddress  []int  `json:"HardwareAddress"`
 	Driver           string `json:"Driver"`
 	NetworkFile      string `json:"NetworkFile"`
@@ -660,6 +661,9 @@ type IfStatus struct {
 	Name        string   `json:"name"`
 	Role        string   `json:"role"` // wan, lan, ""
 	State       string   `json:"state"`
+	Carrier     bool     `json:"carrier"`
+	Speed       int      `json:"speed"`  // Mbit/s, 0 = unknown or no link
+	Duplex      string   `json:"duplex"` // full, half, ""
 	MAC         string   `json:"mac"`
 	Driver      string   `json:"driver"`
 	NetworkFile string   `json:"network_file"`
@@ -687,6 +691,10 @@ func readIfStatus(r Runner, name string) (IfStatus, []Lease) {
 		return st, nil
 	}
 	st.State, st.MAC, st.Driver, st.NetworkFile = l.OperationalState, macString(l.HardwareAddress), l.Driver, l.NetworkFile
+	st.Carrier = strings.Contains(l.CarrierState, "carrier") && l.CarrierState != "no-carrier"
+	if st.Carrier {
+		st.Speed, st.Duplex = sysLinkSpeed(name)
+	}
 	for _, a := range l.Addresses {
 		if a.ScopeString == "link" || a.ScopeString == "host" {
 			continue
@@ -715,4 +723,23 @@ func readIfStatus(r Runner, name string) (IfStatus, []Lease) {
 		}
 	}
 	return st, leases
+}
+
+// sysLinkSpeed reads the negotiated speed from sysfs; the kernel reports -1
+// or fails the read when there is no link.
+func sysLinkSpeed(name string) (int, string) {
+	b, err := os.ReadFile("/sys/class/net/" + name + "/speed")
+	if err != nil {
+		return 0, ""
+	}
+	sp, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if sp < 0 {
+		sp = 0
+	}
+	d, _ := os.ReadFile("/sys/class/net/" + name + "/duplex")
+	dx := strings.TrimSpace(string(d))
+	if dx == "unknown" {
+		dx = ""
+	}
+	return sp, dx
 }
