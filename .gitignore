@@ -13,3 +13,5 @@ backend/kmod/kszreg/Module.symvers
 backend/kmod/kszreg/modules.order
 # board schematic is kept locally
 scheme/
+# local test helpers (board IPs, client boards)
+tools/

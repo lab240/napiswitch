@@ -1,0 +1,57 @@
+// NAPI-Switch: interrupt-driven link detection for the KSZ9567 PHYs.
+//
+// Without an "mdio" subnode the ksz driver does not register its own PHY
+// bus: DSA puts the PHYs on the generic "dsa-0.0" bus without interrupts and
+// phylib polls them once a second, so a link loss is noticed up to 1 s late
+// (INTRP_N -> GPIO4_B1 is wired and in the DT, but never fires).
+// With this node and a phy-handle per port, ksz_mdio_register() creates the
+// "SMI-0" bus and ksz_irq_phy_setup() maps each PHY's interrupt
+// (port_irq-N -> PHY source), so link changes arrive in milliseconds.
+// Needed for ring redundancy (MRP).
+//
+// Build: dtc -@ -I dts -O dtb -o napi-ksz-phy-irq.dtbo napi-ksz-phy-irq.dts
+// Install: /boot/overlay-user/, first boot via oneshot_overlays only.
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "rockchip,rk3308";
+
+	fragment@0 {
+		target-path = "/spi@ff140000/switch@0";
+		__overlay__ {
+			mdio {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				swphy0: ethernet-phy@0 { reg = <0>; };
+				swphy1: ethernet-phy@1 { reg = <1>; };
+				swphy2: ethernet-phy@2 { reg = <2>; };
+				swphy3: ethernet-phy@3 { reg = <3>; };
+				swphy4: ethernet-phy@4 { reg = <4>; };
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/spi@ff140000/switch@0/ethernet-ports/port@0";
+		__overlay__ { phy-handle = <&swphy0>; };
+	};
+	fragment@2 {
+		target-path = "/spi@ff140000/switch@0/ethernet-ports/port@1";
+		__overlay__ { phy-handle = <&swphy1>; };
+	};
+	fragment@3 {
+		target-path = "/spi@ff140000/switch@0/ethernet-ports/port@2";
+		__overlay__ { phy-handle = <&swphy2>; };
+	};
+	fragment@4 {
+		target-path = "/spi@ff140000/switch@0/ethernet-ports/port@3";
+		__overlay__ { phy-handle = <&swphy3>; };
+	};
+	fragment@5 {
+		target-path = "/spi@ff140000/switch@0/ethernet-ports/port@4";
+		__overlay__ { phy-handle = <&swphy4>; };
+	};
+};
