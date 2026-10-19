@@ -142,9 +142,31 @@ func RenderDropins(c *Config, bridge string, unit func(kind, ifname string) stri
 		}
 		// Ports without a networkd file of their own (sfp, not in netplan) are
 		// left alone: there is nothing to attach a drop-in to.
-		put(unit("network", n), s.String())
+		if u := unit("network", n); u != "" {
+			put(u, s.String())
+			files[linkFileName(n)] = renderLink(n, p, cfgPath)
+		}
 	}
 	return files
+}
+
+// linkFileName is our systemd .link file for a switch port.
+func linkFileName(port string) string { return "10-napi-switchd-" + port + ".link" }
+
+// renderLink sets 802.3x pause as udev brings the port up, before its link
+// does (napi-switchd starts later). One .link file applies per device, so it
+// repeats 99-default.link's policies. Off is forced ("autoneg" off too):
+// phylink boots with pause advertised while reporting it off, and udev
+// skips a setting equal to the current one.
+func renderLink(port string, p *Port, cfgPath string) string {
+	var s strings.Builder
+	fmt.Fprintf(&s, dropinHeader, cfgPath)
+	fmt.Fprintf(&s, "\n[Match]\nOriginalName=%s\nDriver=dsa\n", port)
+	s.WriteString("\n[Link]\nNamePolicy=keep kernel database onboard slot path\n" +
+		"AlternativeNamesPolicy=database onboard slot path mac\nMACAddressPolicy=persistent\n")
+	v := yesno(p.FlowControl)
+	fmt.Fprintf(&s, "AutoNegotiationFlowControl=%s\nRxFlowControl=%s\nTxFlowControl=%s\n", v, v, v)
+	return s.String()
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
@@ -187,6 +209,8 @@ func SaveConfig(c *Config, p Paths, bridge string) ([]string, error) {
 		written = append(written, path)
 	}
 	old, _ := filepath.Glob(filepath.Join(p.NetDir, "*.d", dropinName))
+	links, _ := filepath.Glob(filepath.Join(p.NetDir, linkFileName("*")))
+	old = append(old, links...)
 	for _, f := range old {
 		rel, _ := filepath.Rel(p.NetDir, f)
 		if _, ok := files[rel]; !ok {

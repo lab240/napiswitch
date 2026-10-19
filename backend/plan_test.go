@@ -203,6 +203,8 @@ func TestRenderDropins(t *testing.T) {
 		"10-netplan-lan2.network.d/" + dropinName: {"[BridgeVLAN]\nVLAN=10\nPVID=10\nEgressUntagged=10", "[BridgeVLAN]\nVLAN=1\n",
 			"[BridgeFDB]\nMACAddress=00:11:22:33:44:55\nAssociatedWith=master\nVLANId=10"},
 		"10-netplan-lan3.network.d/" + dropinName: {"ActivationPolicy=down"},
+		"10-napi-switchd-lan1.link": {"OriginalName=lan1\nDriver=dsa", "NamePolicy=keep kernel", "MACAddressPolicy=persistent",
+			"AutoNegotiationFlowControl=no\nRxFlowControl=no\nTxFlowControl=no"},
 	} {
 		got, ok := f[path]
 		if !ok {
