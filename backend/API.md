@@ -91,9 +91,15 @@ curl -s -H "Authorization: Bearer $T" $U/ports
   "uptime_s": 86400, "temperatures_c": [48.2],
   "bridge": "br0", "bridge_mac": "f6:3e:43:2b:92:47",
   "addresses": {"br0": ["192.168.30.81/24"], "enx00e04c680026": ["192.168.30.82/24"]},
-  "cpu_port": {"interface": "trunk0", "rx_crc_errors": 0, "switch_rx_crc_errors": 0, "switch_rx_align_errors": 0}
+  "cpu_port": {"interface": "trunk0", "rx_crc_errors": 0, "switch_rx_crc_errors": 0, "switch_rx_align_errors": 0},
+  "health": {"ok": true, "checked": "2026-10-19T23:10:05+03:00", "failures": 0, "mode": "reboot"}
 }
 ```
+
+`health` — последняя проверка сторожа (README, «Сторож: никаких зависаний»): `ok`, число
+неудачных проверок подряд, `error` — причина; `mode`: `reboot` — при сбое перезагрузка,
+`log (recent health reboot)` — недавно уже перезагружались, неудачные проверки только
+пишутся в журнал. `null` при `-health=off`.
 
 `cpu_port` — счётчики ошибок канала RMII между SoC и свитчем. `cpu_port.rmii` — состояние
 временного обхода ошибки платы (см. README, «Временный обход: тактирование RMII»):

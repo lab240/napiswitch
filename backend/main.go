@@ -52,6 +52,8 @@ func main() {
 	rmiiFix := flag.Bool("rmii-fix", true, "TEMPORARY board-bug workaround: switch the KSZ CPU port to the SoC's RMII clock (no-op once R29 is reworked)")
 	kszMod := flag.String("kszreg-module", "/usr/lib/napi-switch/kszreg-%s.ko", "one-shot register module (%s = kernel release)")
 	mrp := flag.String("mrp", mrpCLI, "mrp_server client (Microchip mrp); MRP is unavailable without it")
+	healthMode := flag.String("health", "reboot", "health watchdog: reboot (reboot the board when the switch hangs), log, off")
+	healthState := flag.String("health-state", "/var/lib/napi-switch/health-reboot", "records the last health reboot")
 	flag.Parse()
 	mrpCLI = *mrp
 
@@ -76,6 +78,26 @@ func main() {
 	}
 	api := &API{m: m, token: token, version: version}
 	go m.WatchMRP(time.Second)
+	if *healthMode != "off" {
+		h := &health{r: m.r, log: l, bridge: *bridge, netSys: "/sys/class/net", regmaps: "/sys/kernel/debug/regmap",
+			conduit: func() string {
+				if _, run, err := m.Ports(); err == nil {
+					return run.Conduit
+				}
+				return ""
+			},
+			ringClosed: func() bool {
+				r, ok := readMRP(m.r, *bridge)
+				return ok && r != nil && r.State == "CHK_RC"
+			},
+			hangFile: "/run/napi-switch/health-hang",
+			interval: 5 * time.Second, hangAfter: 25 * time.Second, grace: 30 * time.Second, failMax: 3,
+			stateFile: *healthState, rebootBackoff: 15 * time.Minute,
+			reboot: sysrqReboot, notify: sdNotify}
+		h.logOnly = *healthMode == "log" || *dry
+		go h.Run()
+		api.health = h
+	}
 	if *rmiiFix {
 		f := &rmiiFixer{r: m.r, log: l, regmaps: "/sys/kernel/debug/regmap", devtree: "/sys/class/net", module: *kszMod,
 			conduit: func() string {
@@ -90,6 +112,11 @@ func main() {
 		api.rmii = f
 	}
 	srv := &http.Server{Addr: *listen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		l.Fatalf("listen: %v", err)
+	}
 	l.Printf("napi-switchd %s listening on %s", version, *listen)
-	l.Fatal(srv.ListenAndServe())
+	_ = sdNotify("READY=1")
+	l.Fatal(srv.Serve(ln))
 }

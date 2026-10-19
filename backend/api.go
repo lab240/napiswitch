@@ -31,6 +31,7 @@ type API struct {
 	token   string
 	version string
 	rmii    *rmiiFixer // nil with -rmii-fix=false
+	health  *health    // nil with -health=off
 }
 
 func (a *API) Handler() http.Handler {
@@ -633,7 +634,15 @@ func (a *API) system(*http.Request) (any, error) {
 		"hostname": host, "model": "NAPI-Switch (Microchip KSZ9567)", "kernel": strings.TrimSpace(string(kern)),
 		"daemon_version": a.version, "uptime_s": int(upS), "temperatures_c": temps,
 		"bridge": a.m.bridge, "bridge_mac": run.BridgeMAC, "addresses": addrs, "cpu_port": cpu,
+		"health": a.healthStatus(),
 	}, nil
+}
+
+func (a *API) healthStatus() any {
+	if a.health == nil {
+		return nil
+	}
+	return a.health.Status()
 }
 
 func (a *API) capabilities(*http.Request) (any, error) {
