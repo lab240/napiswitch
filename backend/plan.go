@@ -142,6 +142,7 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 		if c, ok := planLink(n, wp, rp.Link); ok {
 			cmds = append(cmds, c)
 		}
+		cmds = append(cmds, planPause(n, wp, rp.Link)...)
 		if rp.Master != br {
 			continue // not a bridge port (e.g. sfp not yet in br0)
 		}
@@ -240,6 +241,29 @@ func planLink(port string, wp *Port, l LinkInfo) (Cmd, bool) {
 		return cmd("ethtool", "-s", port, "autoneg", "on", "advertise", advMask([]string{m.mode})), true
 	}
 	return cmd("ethtool", "-s", port, "autoneg", "off", "speed", strconv.Itoa(m.speed), "duplex", m.duplex), true
+}
+
+// planPause sets 802.3x pause advertisement (forced pause without autoneg).
+// phylink starts advertising pause with the ethtool -A setting reading
+// rx/tx off, so turning it off from that state needs an "on" first: the
+// kernel ignores a set that equals the current setting.
+func planPause(port string, wp *Port, l LinkInfo) []Cmd {
+	if l.PauseSupported == "" || l.PauseSupported == "No" || wp.FlowControl == l.PauseOn() {
+		return nil
+	}
+	an := "off"
+	if wp.Autoneg || wp.Speed == "auto" {
+		an = "on"
+	}
+	set := func(v string) []string { return []string{"ethtool", "-A", port, "autoneg", an, "rx", v, "tx", v} }
+	if wp.FlowControl {
+		return []Cmd{cmd(set("on")...)}
+	}
+	var cmds []Cmd
+	if !l.PauseRx && !l.PauseTx {
+		cmds = append(cmds, cmdIgn(set("on")...))
+	}
+	return append(cmds, cmd(set("off")...))
 }
 
 // advMask converts link mode names to the legacy ethtool advertise bitmask.

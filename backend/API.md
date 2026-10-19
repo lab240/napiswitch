@@ -139,7 +139,8 @@ curl -s -H "Authorization: Bearer $T" $U/ports
     "up": true, "speed": 1000, "duplex": "full", "autoneg": true,
     "supported_modes": ["10baseT/Half", "10baseT/Full", "100baseT/Half", "100baseT/Full", "1000baseT/Full"],
     "advertised_modes": ["..."], "partner_modes": ["..."],
-    "sqi": 7, "sqi_max": 7
+    "sqi": 7, "sqi_max": 7,
+    "pause_supported": "Symmetric Receive-only", "pause_advertised": "No", "flow_control_active": false
   },
   "speed": "auto", "autoneg": true,
   "bridged": true, "pvid": 1, "tagged": [],
@@ -151,6 +152,8 @@ curl -s -H "Authorization: Bearer $T" $U/ports
 
 - `link.speed` — Мбит/с, 0 — нет линка или неизвестно.
 - `sqi` / `sqi_max` — качество сигнала в кабеле (100/1000BASE-T), `-1` — недоступно.
+- `pause_advertised` — что порт объявляет о pause (`No`, `Symmetric`, ...);
+  `flow_control_active` — pause согласован с партнёром по линку.
 - `bridged: false` — порт не в мосту (например, `sfp`): VLAN, STP, learning к нему не применяются.
 - `stp_state`: `disabled`, `listening`, `learning`, `forwarding`, `blocking`.
 
@@ -370,7 +373,7 @@ JSON merge patch (RFC 7396) поверх действующей конфигур
   "ports": {
     "lan1": {"enabled": true, "description": "uplink", "speed": "auto", "autoneg": true,
              "pvid": 1, "tagged": [10], "learning": true, "isolated": false,
-             "stp_cost": 0, "stp_priority": 32}
+             "stp_cost": 0, "stp_priority": 32, "flow_control": false}
   },
   "static_fdb": [{"mac": "02:00:00:00:00:01", "port": "lan2", "vlan": 10}],
   "mirror": {"dest": "lan4", "sources": [{"port": "lan1", "direction": "both"}]},
@@ -414,6 +417,7 @@ JSON merge patch (RFC 7396) поверх действующей конфигур
 | `isolated` | изолированные порты не обмениваются трафиком друг с другом, только с неизолированными |
 | `stp_cost` | стоимость пути STP, 0 — автоматически по скорости |
 | `stp_priority` | приоритет порта STP, 0..63 |
+| `flow_control` | управление потоком IEEE 802.3x (pause): объявлять в автосогласовании (при жёсткой скорости — включить принудительно). **По умолчанию `false`**, как у промышленных свитчей (Moxa EDS: «FDX Flow Ctrl» — Disabled): с pause медленный порт тормозит весь трафик отправителя, а не только свой. Смена переподнимает линк (~3 с) |
 
 Access-порт: `pvid` без `tagged`. Trunk: `pvid` (native) + `tagged`. Только тегированный: `pvid: 0`.
 

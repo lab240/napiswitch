@@ -573,6 +573,7 @@ function viewPorts() {
       <td><input type="text" data-path="${base}description" value="${esc(d.description)}" maxlength="64" placeholder="—" style="width:170px"></td>
       <td><select data-path="${base}speed" data-rerender="1" ${caps.copper ? "" : "disabled"}>${speeds.map((s) => `<option value="${s}" ${d.speed === s ? "selected" : ""}>${SPEED_LABEL[s] || s}</option>`).join("")}</select></td>
       <td title="Выключенный autoneg задаёт скорость жёстко; для 1000 нужен autoneg">${sw(`data-path="${base}autoneg"`, d.autoneg, !caps.copper || d.speed === "auto")}</td>
+      <td title="Управление потоком 802.3x (pause). Выключено по умолчанию: медленный порт через pause тормозит весь трафик отправителя">${sw(`data-path="${base}flow_control"`, d.flow_control, !caps.copper)}</td>
       <td id="st-${esc(n)}">${stpCell(p)}</td>
       <td>${sw(`data-path="${base}learning"`, d.learning, !br)}</td>
       <td title="Изолированные порты не обмениваются трафиком друг с другом, только с неизолированными">${sw(`data-path="${base}isolated"`, d.isolated, !br)}</td>
@@ -584,7 +585,7 @@ function viewPorts() {
   const wan = frontWAN();
   return `<div class="panels"><div class="card"><h2>Панель коммутатора</h2>${frontPanel()}</div>${wan ? `<div class="card wancard"><h2>WAN-порт</h2><div class="chassis">${wan}</div></div>` : ""}</div>
   <div class="card"><h2>Порты коммутатора</h2><div class="scroll"><table>
-    <thead><tr><th>Порт</th><th>Вкл</th><th>Линк</th><th>Описание</th><th>Скорость</th><th>Autoneg</th><th>STP</th><th>Обучение MAC</th><th>Изоляция</th><th>Стоимость STP</th><th>Приор. STP</th><th></th></tr></thead>
+    <thead><tr><th>Порт</th><th>Вкл</th><th>Линк</th><th>Описание</th><th>Скорость</th><th>Autoneg</th><th>Flow control</th><th>STP</th><th>Обучение MAC</th><th>Изоляция</th><th>Стоимость STP</th><th>Приор. STP</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
 }
 
@@ -619,6 +620,7 @@ function portStatus(n) {
   return `<div class="kv">
     <div>Линк</div><div>${linkCell(p)}</div>
     <div>Autoneg</div><div>${l.autoneg ? "да" : "нет"}${l.partner_modes?.length ? ` <span class="note">партнёр: ${esc(l.partner_modes.join(", "))}</span>` : ""}</div>
+    <div>Flow control</div><div>${l.flow_control_active ? "согласован" : "нет"} <span class="note">объявляем: ${esc(l.pause_advertised || "—")}</span></div>
     <div>STP</div><div>${stpCell(p)}</div>
     <div>MAC</div><div class="mono">${esc(p.mac)}</div>
     <div>VLAN в чипе</div><div>${esc(vl || "—")}</div></div>`;
@@ -631,7 +633,8 @@ function portSettings(n) {
     <label>Включён</label><div class="fld" data-path="${base}enabled">${sw(`data-path="${base}enabled"`, d.enabled)}</div>
     <label>Описание</label><div><input type="text" data-path="${base}description" value="${esc(d.description)}" maxlength="64" placeholder="например, ПЛК шкаф 3" style="width:100%"></div>
     <label>Скорость</label><div><select data-path="${base}speed" data-rerender="1" ${caps.copper ? "" : "disabled"}>${speeds.map((s) => `<option value="${s}" ${d.speed === s ? "selected" : ""}>${SPEED_LABEL[s] || s}</option>`).join("")}</select></div>
-    <label>Autoneg</label><div class="fld" data-path="${base}autoneg">${sw(`data-path="${base}autoneg"`, d.autoneg, !caps.copper || d.speed === "auto" || d.speed === "1000full")} <span class="note">выкл. — скорость и дуплекс жёстко</span></div>`;
+    <label>Autoneg</label><div class="fld" data-path="${base}autoneg">${sw(`data-path="${base}autoneg"`, d.autoneg, !caps.copper || d.speed === "auto" || d.speed === "1000full")} <span class="note">выкл. — скорость и дуплекс жёстко</span></div>
+    <label>Flow control</label><div class="fld" data-path="${base}flow_control">${sw(`data-path="${base}flow_control"`, d.flow_control, !caps.copper)} <span class="note">pause 802.3x; выкл. по умолчанию — медленный порт иначе тормозит весь трафик отправителя</span></div>`;
   if (br) {
     h += `<label>VLAN без тега (PVID)</label><div><select data-path="${base}pvid" data-type="int" data-rerender="1"><option value="0" ${d.pvid === 0 ? "selected" : ""}>— нет</option>${c.vlans.map((v) => `<option value="${v.id}" ${d.pvid === v.id ? "selected" : ""}>${v.id}${v.name ? " — " + esc(v.name) : ""}</option>`).join("")}</select></div>
     <label>VLAN с тегом</label><div class="vtags">${c.vlans.filter((v) => v.id !== d.pvid).map((v) => `<label><input type="checkbox" data-vtag="${v.id}" ${d.tagged.includes(v.id) ? "checked" : ""}> ${v.id}${v.name ? " " + esc(v.name) : ""}</label>`).join("") || `<span class="note">других VLAN нет</span>`}</div>

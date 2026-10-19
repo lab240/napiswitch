@@ -81,7 +81,17 @@ type LinkInfo struct {
 	Partner    []string `json:"partner_modes"`
 	SQI        int      `json:"sqi"`     // signal quality, -1 = n/a
 	SQIMax     int      `json:"sqi_max"` // -1 = n/a
+	// Pause (802.3x flow control): what the port advertises ("No",
+	// "Symmetric", ...), the ethtool -A setting and the negotiated result.
+	PauseSupported  string `json:"pause_supported"`
+	PauseAdvertised string `json:"pause_advertised"`
+	PauseRx         bool   `json:"-"` // ethtool -A setting
+	PauseTx         bool   `json:"-"`
+	FlowControl     bool   `json:"flow_control_active"` // negotiated rx or tx pause
 }
+
+// PauseOn reports whether the port advertises (or forces) pause.
+func (l LinkInfo) PauseOn() bool { return l.PauseAdvertised != "" && l.PauseAdvertised != "No" }
 
 // SpeedSetting derives the config-style speed value from ethtool state.
 func (l LinkInfo) SpeedSetting() (speed string, autoneg bool) {
@@ -373,6 +383,8 @@ func readLink(r Runner, port string) LinkInfo {
 		Partner    []string        `json:"link-partner-advertised-link-modes"`
 		SQI        *int            `json:"sqi"`
 		SQIMax     *int            `json:"sqi-max"`
+		PauseSup   string          `json:"supported-pause-frame-use"`
+		PauseAdv   string          `json:"advertised-pause-frame-use"`
 	}
 	if json.Unmarshal(out, &e) != nil || len(e) == 0 {
 		return li
@@ -392,6 +404,19 @@ func readLink(r Runner, port string) LinkInfo {
 	}
 	if x.SQIMax != nil {
 		li.SQIMax = *x.SQIMax
+	}
+	li.PauseSupported, li.PauseAdvertised = x.PauseSup, x.PauseAdv
+	if out, err := r.Output("ethtool", "--json", "-a", port); err == nil {
+		var a []struct {
+			Rx, Tx     bool
+			Negotiated *struct{ Rx, Tx bool }
+		}
+		if json.Unmarshal(out, &a) == nil && len(a) > 0 {
+			li.PauseRx, li.PauseTx = a[0].Rx, a[0].Tx
+			if n := a[0].Negotiated; n != nil && li.Up {
+				li.FlowControl = n.Rx || n.Tx
+			}
+		}
 	}
 	return li
 }
@@ -492,7 +517,7 @@ func ImportConfig(run *Running) *Config {
 			speed, an = "auto", true
 		}
 		p := &Port{Enabled: rp.Up, Description: rp.Alias, Speed: speed, Autoneg: an, Learning: rp.Learning,
-			Isolated: rp.Isolated, STPPriority: rp.Priority, Tagged: []int{}}
+			Isolated: rp.Isolated, STPPriority: rp.Priority, Tagged: []int{}, FlowControl: rp.Link.PauseOn()}
 		if p.STPPriority < 0 {
 			p.STPPriority = 32
 		}

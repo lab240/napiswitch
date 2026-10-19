@@ -78,6 +78,11 @@ type Port struct {
 	Isolated    bool  `json:"isolated"`
 	STPCost     int   `json:"stp_cost"`     // 0 = automatic (not set)
 	STPPriority int   `json:"stp_priority"` // 0..63
+	// FlowControl advertises IEEE 802.3x pause in autonegotiation (forces it
+	// on a fixed-speed link). Off by default, as on industrial switches
+	// (Moxa EDS: "FDX Flow Ctrl" factory default Disabled): with pause a
+	// slow port stalls every flow of the sender, not just its own.
+	FlowControl bool `json:"flow_control"`
 }
 
 type FDBEntry struct {

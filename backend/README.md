@@ -226,10 +226,10 @@ VLAN (режим 802.1Q, VLAN управления, матрица U/T), STP, MA
   "ports": {
     "lan1": {"enabled": true, "description": "uplink", "speed": "auto", "autoneg": true,
              "pvid": 1, "tagged": [10], "learning": true, "isolated": false,
-             "stp_cost": 0, "stp_priority": 32},
+             "stp_cost": 0, "stp_priority": 32, "flow_control": false},
     "lan2": {"enabled": true, "description": "PLC", "speed": "100full", "autoneg": true,
              "pvid": 10, "tagged": [], "learning": true, "isolated": true,
-             "stp_cost": 0, "stp_priority": 32}
+             "stp_cost": 0, "stp_priority": 32, "flow_control": false}
   },
   "static_fdb": [{"mac": "02:00:00:00:00:01", "port": "lan2", "vlan": 10}],
   "mirror": {"dest": "lan4", "sources": [{"port": "lan1", "direction": "both"}]}

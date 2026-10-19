@@ -342,3 +342,35 @@ func TestParseMRP(t *testing.T) {
 		t.Fatal("expected nil for other bridge / no rings")
 	}
 }
+
+func TestPlanPause(t *testing.T) {
+	cu := LinkInfo{PauseSupported: "Symmetric Receive-only"}
+	for _, c := range []struct {
+		name string
+		want bool
+		l    LinkInfo
+		port Port
+		cmds []string
+	}{
+		// phylink's boot state: pause advertised, ethtool -A reads rx/tx off.
+		{"boot default -> off", false, LinkInfo{PauseSupported: cu.PauseSupported, PauseAdvertised: "Symmetric Receive-only"},
+			Port{Speed: "auto", Autoneg: true},
+			[]string{"ethtool -A lan1 autoneg on rx on tx on", "ethtool -A lan1 autoneg on rx off tx off"}},
+		{"on -> off", false, LinkInfo{PauseSupported: cu.PauseSupported, PauseAdvertised: "Symmetric", PauseRx: true, PauseTx: true},
+			Port{Speed: "auto", Autoneg: true}, []string{"ethtool -A lan1 autoneg on rx off tx off"}},
+		{"off -> on", true, LinkInfo{PauseSupported: cu.PauseSupported, PauseAdvertised: "No"},
+			Port{Speed: "auto", Autoneg: true}, []string{"ethtool -A lan1 autoneg on rx on tx on"}},
+		{"forced speed", true, LinkInfo{PauseSupported: cu.PauseSupported, PauseAdvertised: "No"},
+			Port{Speed: "100full", Autoneg: false}, []string{"ethtool -A lan1 autoneg off rx on tx on"}},
+		{"already off", false, LinkInfo{PauseSupported: cu.PauseSupported, PauseAdvertised: "No"}, Port{Speed: "auto"}, nil},
+		{"no pause support (sfp)", true, LinkInfo{}, Port{Speed: "auto"}, nil},
+	} {
+		c.port.FlowControl = c.want
+		if got := strs(planPause("lan1", &c.port, c.l)); !slices.Equal(got, c.cmds) {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.cmds)
+		}
+	}
+	if !(LinkInfo{PauseAdvertised: "Symmetric"}).PauseOn() || (LinkInfo{PauseAdvertised: "No"}).PauseOn() {
+		t.Error("PauseOn")
+	}
+}
