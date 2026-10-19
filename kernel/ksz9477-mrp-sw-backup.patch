@@ -120,7 +120,7 @@
  	.mdb_add = ksz9477_mdb_add,
  	.mdb_del = ksz9477_mdb_del,
  	.change_mtu = ksz9477_change_mtu,
-@@ -3349,6 +3350,62 @@
+@@ -3349,6 +3350,82 @@
  	return dev->dev_ops->fdb_dump(dev, port, cb, data);
  }
  
@@ -144,6 +144,20 @@
 +	return dev->dev_ops->mrp_trap ? 0 : -EOPNOTSUPP;
 +}
 +
++/* The bridge sends a ring role to every port of the bridge, not just to the
++ * ring ports, so the trap is tracked per ring: on while any ring has a role.
++ * mrp_server also re-sends the role of a ring on state changes.
++ */
++static int ksz_mrp_ring_find(struct ksz_device *dev, u32 ring_id)
++{
++	int i;
++
++	for (i = 0; i < dev->mrp_num_rings; i++)
++		if (dev->mrp_rings[i] == ring_id)
++			return i;
++	return -1;
++}
++
 +static int ksz_port_mrp_add_ring_role(struct dsa_switch *ds, int port,
 +				      const struct switchdev_obj_ring_role_mrp *mrp)
 +{
@@ -153,12 +167,16 @@
 +	if (!dev->dev_ops->mrp_trap || !mrp->sw_backup)
 +		return -EOPNOTSUPP;
 +
-+	if (!dev->mrp_trap_ports) {
++	if (ksz_mrp_ring_find(dev, mrp->ring_id) >= 0)
++		return 0;
++	if (dev->mrp_num_rings == ARRAY_SIZE(dev->mrp_rings))
++		return -ENOSPC;
++	if (!dev->mrp_num_rings) {
 +		err = dev->dev_ops->mrp_trap(dev, true);
 +		if (err)
 +			return err;
 +	}
-+	dev->mrp_trap_ports |= BIT(port);
++	dev->mrp_rings[dev->mrp_num_rings++] = mrp->ring_id;
 +
 +	return 0;
 +}
@@ -167,14 +185,16 @@
 +				      const struct switchdev_obj_ring_role_mrp *mrp)
 +{
 +	struct ksz_device *dev = ds->priv;
++	int i;
 +
 +	if (!dev->dev_ops->mrp_trap || !mrp->sw_backup)
 +		return -EOPNOTSUPP;
 +
-+	if (!(dev->mrp_trap_ports & BIT(port)))
++	i = ksz_mrp_ring_find(dev, mrp->ring_id);
++	if (i < 0)
 +		return 0;
-+	dev->mrp_trap_ports &= ~BIT(port);
-+	if (!dev->mrp_trap_ports)
++	dev->mrp_rings[i] = dev->mrp_rings[--dev->mrp_num_rings];
++	if (!dev->mrp_num_rings)
 +		return dev->dev_ops->mrp_trap(dev, false);
 +
 +	return 0;
@@ -183,7 +203,7 @@
  static int ksz_port_mdb_add(struct dsa_switch *ds, int port,
  			    const struct switchdev_obj_port_mdb *mdb,
  			    struct dsa_db db)
-@@ -4994,6 +5051,10 @@
+@@ -4994,6 +5071,10 @@
  	.port_fdb_del		= ksz_port_fdb_del,
  	.port_mdb_add           = ksz_port_mdb_add,
  	.port_mdb_del           = ksz_port_mdb_del,
@@ -196,15 +216,16 @@
  	.get_stats64		= ksz_get_stats64,
 --- a/drivers/net/dsa/microchip/ksz_common.h
 +++ b/drivers/net/dsa/microchip/ksz_common.h
-@@ -165,6 +165,7 @@
+@@ -165,6 +165,8 @@
  	struct mutex dev_mutex;		/* device access */
  	struct mutex regmap_mutex;	/* regmap access */
  	struct mutex alu_mutex;		/* ALU access */
-+	u32 mrp_trap_ports;		/* ports with a software MRP ring role */
++	u32 mrp_rings[8];		/* rings with a software MRP role */
++	int mrp_num_rings;
  	struct mutex vlan_mutex;	/* vlan access */
  	const struct ksz_dev_ops *dev_ops;
  
-@@ -422,6 +423,7 @@
+@@ -422,6 +424,7 @@
  	int (*mdb_add)(struct ksz_device *dev, int port,
  		       const struct switchdev_obj_port_mdb *mdb,
  		       struct dsa_db db);
