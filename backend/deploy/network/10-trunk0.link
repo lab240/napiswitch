@@ -1,0 +1,10 @@
+# NAPI-Switch: the GMAC wired over RMII to KSZ9567 port 6 is the DSA conduit.
+# Give it a name outside every "e*"/"en*" glob and no MAC-based altname
+# (enx12df3392d652 used to be matched by netplan "enx*").
+# Matched by bus path: udev reports the driver as st_gmac, not rk_gmac-dwmac.
+[Match]
+Path=platform-ff4e0000.ethernet
+
+[Link]
+Name=trunk0
+AlternativeNamesPolicy=

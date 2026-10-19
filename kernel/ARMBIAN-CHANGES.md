@@ -80,6 +80,7 @@ github.com/lab240/napiswitch.
 | Что | Файл | Зачем |
 |---|---|---|
 | Имя conduit | `/etc/systemd/network/10-trunk0.link`: `[Match] Path=platform-ff4e0000.ethernet`, `[Link] Name=trunk0`, `AlternativeNamesPolicy=` | GMAC → `trunk0`, вне масок `e*`/`en*` netplan |
+| Flow control выкл. на портах | `/etc/systemd/network/10-napi-switchd-lan1..5.link` (готовые файлы — `backend/deploy/network/`) | udev выключает 802.3x pause при появлении порта, до первого линка (по умолчанию как у Moxa). Проверено перезагрузкой |
 | Panic → reboot | `/etc/sysctl.d/91-napi-panic.conf`: `kernel.panic = 10`, `kernel.panic_on_oops = 1` | |
 | Аппаратный сторож | `/etc/systemd/system.conf.d/napi-watchdog.conf`: `RuntimeWatchdogSec=30s`, `RebootWatchdogSec=2min` | dw_wdt |
 | MRP-демон | Microchip `mrp` + `libcfm` (закреплены `MRP=177717ee`, `CFM=7a50f4ad`), служба `napi-mrp.service` | `backend/deploy/mrp-build.sh` |

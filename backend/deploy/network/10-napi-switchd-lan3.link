@@ -1,0 +1,14 @@
+# NAPI-Switch default (image): 802.3x flow control off on this port. napi-switchd
+# regenerates this file from /etc/napi-switch/config.json (ports.X.flow_control).
+
+[Match]
+OriginalName=lan3
+Driver=dsa
+
+[Link]
+NamePolicy=keep kernel database onboard slot path
+AlternativeNamesPolicy=database onboard slot path mac
+MACAddressPolicy=persistent
+AutoNegotiationFlowControl=no
+RxFlowControl=no
+TxFlowControl=no
