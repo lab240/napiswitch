@@ -1,0 +1,15 @@
+--- a/net/bridge/br_mrp.c
++++ b/net/bridge/br_mrp.c
+@@ -535,8 +535,11 @@
+ 	INIT_DELAYED_WORK(&mrp->in_test_work, br_mrp_in_test_work_expired);
+ 	hlist_add_tail_rcu(&mrp->list, &br->mrp_list);
+ 
++	/* A switch without MRP offload (e.g. DSA ksz9477) answers -EOPNOTSUPP;
++	 * the instance then runs in software like the ring role/test do.
++	 */
+ 	err = br_mrp_switchdev_add(br, mrp);
+-	if (err)
++	if (err && err != -EOPNOTSUPP)
+ 		goto delete_mrp;
+ 
+ 	return 0;

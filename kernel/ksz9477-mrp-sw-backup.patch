@@ -1,0 +1,214 @@
+--- a/drivers/net/dsa/microchip/ksz9477.c
++++ b/drivers/net/dsa/microchip/ksz9477.c
+@@ -913,6 +913,99 @@
+ 	return ret;
+ }
+ 
++/* MRP (IEC 62439-2) multicast: MRP_Test and ring control frames, and
++ * MRP_InTest for interconnections.
++ */
++static const u8 ksz9477_mrp_dmac[][ETH_ALEN] = {
++	{ 0x01, 0x15, 0x4e, 0x00, 0x00, 0x01 },
++	{ 0x01, 0x15, 0x4e, 0x00, 0x00, 0x02 },
++	{ 0x01, 0x15, 0x4e, 0x00, 0x00, 0x03 },
++};
++
++static int ksz9477_mrp_static(struct ksz_device *dev, const u8 *addr,
++			      bool add)
++{
++	const u8 *shifts = dev->info->shifts;
++	const u32 *masks = dev->info->masks;
++	u32 static_table[4];
++	u32 mac_hi, mac_lo;
++	int index, err = 0;
++	int free = -1;
++	u32 data;
++
++	mac_hi = (addr[0] << 8) | addr[1];
++	mac_lo = (addr[2] << 24) | (addr[3] << 16) | (addr[4] << 8) | addr[5];
++
++	mutex_lock(&dev->alu_mutex);
++
++	for (index = 0; index < dev->info->num_statics; index++) {
++		data = (index << shifts[ALU_STAT_INDEX]) |
++			masks[ALU_STAT_READ] | ALU_STAT_START;
++		ksz_write32(dev, REG_SW_ALU_STAT_CTRL__4, data);
++		err = ksz9477_wait_alu_sta_ready(dev);
++		if (err)
++			goto exit;
++		ksz9477_read_table(dev, static_table);
++
++		if (!(static_table[0] & ALU_V_STATIC_VALID)) {
++			if (free < 0)
++				free = index;
++			continue;
++		}
++		if ((static_table[2] >> ALU_V_FID_S) == 0 &&
++		    (static_table[2] & ALU_V_MAC_ADDR_HI) == mac_hi &&
++		    static_table[3] == mac_lo)
++			break;
++	}
++
++	if (index == dev->info->num_statics) {
++		if (!add)
++			goto exit;
++		if (free < 0) {
++			err = -ENOSPC;
++			goto exit;
++		}
++		index = free;
++	}
++
++	memset(static_table, 0, sizeof(static_table));
++	if (add) {
++		/* To the CPU only, also from ports the ring protocol blocked:
++		 * the bridge runs MRP and forwards these frames in software.
++		 */
++		static_table[0] = ALU_V_STATIC_VALID;
++		static_table[1] = ALU_V_OVERRIDE | BIT(dev->cpu_port);
++		static_table[2] = mac_hi;
++		static_table[3] = mac_lo;
++	}
++	ksz9477_write_table(dev, static_table);
++
++	data = (index << shifts[ALU_STAT_INDEX]) | ALU_STAT_START;
++	ksz_write32(dev, REG_SW_ALU_STAT_CTRL__4, data);
++	err = ksz9477_wait_alu_sta_ready(dev);
++
++exit:
++	mutex_unlock(&dev->alu_mutex);
++	return err;
++}
++
++int ksz9477_mrp_trap(struct ksz_device *dev, bool enable)
++{
++	int i, err;
++
++	for (i = 0; i < ARRAY_SIZE(ksz9477_mrp_dmac); i++) {
++		err = ksz9477_mrp_static(dev, ksz9477_mrp_dmac[i], enable);
++		if (err && enable)
++			goto undo;
++	}
++	return 0;
++
++undo:
++	while (--i >= 0)
++		ksz9477_mrp_static(dev, ksz9477_mrp_dmac[i], false);
++	return err;
++}
++
+ int ksz9477_mdb_add(struct ksz_device *dev, int port,
+ 		    const struct switchdev_obj_port_mdb *mdb, struct dsa_db db)
+ {
+--- a/drivers/net/dsa/microchip/ksz9477.h
++++ b/drivers/net/dsa/microchip/ksz9477.h
+@@ -46,6 +46,7 @@
+ 		    const unsigned char *addr, u16 vid, struct dsa_db db);
+ int ksz9477_fdb_del(struct ksz_device *dev, int port,
+ 		    const unsigned char *addr, u16 vid, struct dsa_db db);
++int ksz9477_mrp_trap(struct ksz_device *dev, bool enable);
+ int ksz9477_mdb_add(struct ksz_device *dev, int port,
+ 		    const struct switchdev_obj_port_mdb *mdb, struct dsa_db db);
+ int ksz9477_mdb_del(struct ksz_device *dev, int port,
+--- a/drivers/net/dsa/microchip/ksz_common.c
++++ b/drivers/net/dsa/microchip/ksz_common.c
+@@ -489,6 +489,7 @@
+ 	.fdb_dump = ksz9477_fdb_dump,
+ 	.fdb_add = ksz9477_fdb_add,
+ 	.fdb_del = ksz9477_fdb_del,
++	.mrp_trap = ksz9477_mrp_trap,
+ 	.mdb_add = ksz9477_mdb_add,
+ 	.mdb_del = ksz9477_mdb_del,
+ 	.change_mtu = ksz9477_change_mtu,
+@@ -3349,6 +3350,62 @@
+ 	return dev->dev_ops->fdb_dump(dev, port, cb, data);
+ }
+ 
++/* No MRP offload in the chip: the bridge runs MRP in software. The
++ * switch only has to hand MRP frames to the CPU, also from a ring port the
++ * protocol set to blocking, which is what accepting sw_backup asks for.
++ */
++static int ksz_port_mrp_add(struct dsa_switch *ds, int port,
++			    const struct switchdev_obj_mrp *mrp)
++{
++	struct ksz_device *dev = ds->priv;
++
++	return dev->dev_ops->mrp_trap ? 0 : -EOPNOTSUPP;
++}
++
++static int ksz_port_mrp_del(struct dsa_switch *ds, int port,
++			    const struct switchdev_obj_mrp *mrp)
++{
++	struct ksz_device *dev = ds->priv;
++
++	return dev->dev_ops->mrp_trap ? 0 : -EOPNOTSUPP;
++}
++
++static int ksz_port_mrp_add_ring_role(struct dsa_switch *ds, int port,
++				      const struct switchdev_obj_ring_role_mrp *mrp)
++{
++	struct ksz_device *dev = ds->priv;
++	int err;
++
++	if (!dev->dev_ops->mrp_trap || !mrp->sw_backup)
++		return -EOPNOTSUPP;
++
++	if (!dev->mrp_trap_ports) {
++		err = dev->dev_ops->mrp_trap(dev, true);
++		if (err)
++			return err;
++	}
++	dev->mrp_trap_ports |= BIT(port);
++
++	return 0;
++}
++
++static int ksz_port_mrp_del_ring_role(struct dsa_switch *ds, int port,
++				      const struct switchdev_obj_ring_role_mrp *mrp)
++{
++	struct ksz_device *dev = ds->priv;
++
++	if (!dev->dev_ops->mrp_trap || !mrp->sw_backup)
++		return -EOPNOTSUPP;
++
++	if (!(dev->mrp_trap_ports & BIT(port)))
++		return 0;
++	dev->mrp_trap_ports &= ~BIT(port);
++	if (!dev->mrp_trap_ports)
++		return dev->dev_ops->mrp_trap(dev, false);
++
++	return 0;
++}
++
+ static int ksz_port_mdb_add(struct dsa_switch *ds, int port,
+ 			    const struct switchdev_obj_port_mdb *mdb,
+ 			    struct dsa_db db)
+@@ -4994,6 +5051,10 @@
+ 	.port_fdb_del		= ksz_port_fdb_del,
+ 	.port_mdb_add           = ksz_port_mdb_add,
+ 	.port_mdb_del           = ksz_port_mdb_del,
++	.port_mrp_add		= ksz_port_mrp_add,
++	.port_mrp_del		= ksz_port_mrp_del,
++	.port_mrp_add_ring_role	= ksz_port_mrp_add_ring_role,
++	.port_mrp_del_ring_role	= ksz_port_mrp_del_ring_role,
+ 	.port_mirror_add	= ksz_port_mirror_add,
+ 	.port_mirror_del	= ksz_port_mirror_del,
+ 	.get_stats64		= ksz_get_stats64,
+--- a/drivers/net/dsa/microchip/ksz_common.h
++++ b/drivers/net/dsa/microchip/ksz_common.h
+@@ -165,6 +165,7 @@
+ 	struct mutex dev_mutex;		/* device access */
+ 	struct mutex regmap_mutex;	/* regmap access */
+ 	struct mutex alu_mutex;		/* ALU access */
++	u32 mrp_trap_ports;		/* ports with a software MRP ring role */
+ 	struct mutex vlan_mutex;	/* vlan access */
+ 	const struct ksz_dev_ops *dev_ops;
+ 
+@@ -422,6 +423,7 @@
+ 	int (*mdb_add)(struct ksz_device *dev, int port,
+ 		       const struct switchdev_obj_port_mdb *mdb,
+ 		       struct dsa_db db);
++	int (*mrp_trap)(struct ksz_device *dev, bool enable);
+ 	int (*mdb_del)(struct ksz_device *dev, int port,
+ 		       const struct switchdev_obj_port_mdb *mdb,
+ 		       struct dsa_db db);
