@@ -60,6 +60,7 @@ func (a *API) Handler() http.Handler {
 	h("GET "+apiPrefix+"/stp", a.stp)
 	h("GET "+apiPrefix+"/multicast", a.multicast)
 	h("GET "+apiPrefix+"/mirror", a.mirror)
+	h("GET "+apiPrefix+"/mrp", a.mrp)
 	h("GET "+apiPrefix+"/network", a.network)
 
 	h("GET "+apiPrefix+"/config", func(*http.Request) (any, error) { return a.m.View(), nil })
@@ -526,6 +527,16 @@ func (a *API) mirror(*http.Request) (any, error) {
 	return map[string]any{"running": run.Mirror, "sessions_max": 1}, nil
 }
 
+// mrp reports the ring as mrp_server sees it; available is false when
+// mrp_server does not answer (not installed, or a kernel without MRP).
+func (a *API) mrp(*http.Request) (any, error) {
+	_, run, err := a.m.Ports()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"available": run.MRPAvail, "running": run.MRP, "profiles": mrpProfiles}, nil
+}
+
 // network reports the L3 state: WAN candidates with their addresses, the
 // bridge (LAN), DHCP leases, and a suggested config for taking over from netplan.
 func (a *API) network(*http.Request) (any, error) {
@@ -645,6 +656,7 @@ func (a *API) capabilities(*http.Request) (any, error) {
 		"stp":         map[string]any{"protocols": []string{"stp"}, "rstp": false, "mstp": false},
 		"igmp":        map[string]any{"snooping": true, "querier": true},
 		"mirror":      map[string]any{"sessions": 1, "directions": []string{"rx", "tx", "both"}},
+		"mrp":         map[string]any{"available": run.MRPAvail, "rings": 1, "roles": []string{"mrm", "mrc"}, "profiles": mrpProfiles, "offload": false},
 		"isolation":   true,
 		"learning":    true,
 		"jumbo":       false, // MTU change re-opens the CPU conduit, unsafe on this board

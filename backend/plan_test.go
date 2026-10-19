@@ -247,3 +247,82 @@ func TestAgeingIgnoredDuringTopologyChange(t *testing.T) {
 		t.Fatalf("got %q", strs(p))
 	}
 }
+
+func TestMRPEnableDisable(t *testing.T) {
+	ring := &MRP{RingID: 1, Role: "mrm", Primary: "lan1", Secondary: "lan3", Profile: 200}
+	mrp := mrpCLI
+
+	// STP on -> MRP: lan3 stays down until the ring exists, no window with a
+	// loop and neither protocol.
+	run := testRunning()
+	c := ImportConfig(run)
+	c.Bridge.STP.Enabled = false
+	c.MRP = ring
+	if _, err := c.Validate(testPorts); err != nil {
+		t.Fatal(err)
+	}
+	got := strs(Plan(c, run, PlanOpts{Bridge: "br0"}))
+	want := []string{
+		"ip link set dev lan3 down",
+		"ip link set dev br0 type bridge stp_state 0",
+		mrp + " addmrp bridge br0 ring_nr 1 pport lan1 sport lan3 ring_role mrm ring_recv 200",
+		"ip link set dev lan3 up",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("enable:\n got %q\nwant %q", got, want)
+	}
+
+	// The manager swapped primary/secondary at runtime: same ring, no-op.
+	run.Bridge.STP = false
+	run.MRP = &RunMRP{MRP: MRP{RingID: 1, Role: "mrm", Primary: "lan3", Secondary: "lan1", Profile: 200}, State: "CHK_RC"}
+	if p := Plan(c, run, PlanOpts{Bridge: "br0"}); len(p) != 0 {
+		t.Fatalf("swapped ports: expected no commands, got %q", strs(p))
+	}
+	if ic := ImportConfig(run); !mrpEqual(ic.MRP, ring) || ic.Bridge.STP.Enabled {
+		t.Fatalf("import: %+v stp=%v", ic.MRP, ic.Bridge.STP.Enabled)
+	}
+
+	// MRP -> STP: the ring goes before STP comes back (the kernel refuses
+	// STP while MRP is on); the running secondary (lan1) is the one held down.
+	off := ImportConfig(run)
+	off.MRP = nil
+	off.Bridge.STP.Enabled = true
+	got = strs(Plan(off, run, PlanOpts{Bridge: "br0"}))
+	want = []string{
+		"ip link set dev lan1 down",
+		mrp + " delmrp bridge br0 ring_nr 1",
+		"ip link set dev br0 type bridge stp_state 1",
+		"ip link set dev lan1 up",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("disable:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMRPValidate(t *testing.T) {
+	c := DefaultConfig(testPorts)
+	c.MRP = &MRP{RingID: 0, Role: "mra", Primary: "lan1", Secondary: "lan1", Profile: 30}
+	_, err := c.Validate(testPorts)
+	ve, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+	for _, s := range []string{"ring_id", "role", "profile", "must differ", "STP or MRP"} {
+		if !slices.ContainsFunc(ve.Problems, func(p string) bool { return strings.Contains(p, s) }) {
+			t.Errorf("no problem mentioning %q in %q", s, ve.Problems)
+		}
+	}
+}
+
+func TestParseMRP(t *testing.T) {
+	out := "bridge: br0 ring_nr: 1 pport: lan5 sport: lan1 mra_support: 0 ring_role: MRM prio: 32768 ring_recv: 500 \n" +
+		"react_on_link_change: 1 ring_state: CHK_RC \n"
+	got := parseMRP(out, "br0")
+	want := &RunMRP{MRP: MRP{RingID: 1, Role: "mrm", Primary: "lan5", Secondary: "lan1", Profile: 500}, State: "CHK_RC"}
+	if got == nil || *got != *want {
+		t.Fatalf("got %+v", got)
+	}
+	if parseMRP(out, "br1") != nil || parseMRP("", "br0") != nil {
+		t.Fatal("expected nil for other bridge / no rings")
+	}
+}

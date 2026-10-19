@@ -175,6 +175,28 @@ func (m *Manager) Start(wait time.Duration) error {
 	return nil
 }
 
+// WatchMRP restores the ring when it disappears while configured: a
+// restarted mrp_server clears every ring in the kernel, leaving the loop
+// with neither MRP nor STP. Plan holds the secondary port down meanwhile.
+func (m *Manager) WatchMRP(every time.Duration) {
+	for range time.Tick(every) {
+		m.mu.Lock()
+		// One `mrp getmrp` per tick; the full state is read only on a miss.
+		if c := m.applied; c != nil && c.MRP != nil {
+			if r, ok := readMRP(m.r, m.bridge); !ok || r != nil {
+				m.mu.Unlock()
+				continue
+			}
+			if run, err := ReadRunning(m.r, m.bridge); err == nil && run.MRPAvail && run.MRP == nil {
+				cmds := Plan(c, run, m.opts(false))
+				_, err := m.exec(cmds)
+				m.event("mrp: ring %d was gone (mrp_server restarted?), restored (err=%v)", c.MRP.RingID, err)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
 func (m *Manager) importNow() *Config {
 	run, err := ReadRunning(m.r, m.bridge)
 	if err != nil {

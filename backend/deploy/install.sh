@@ -13,6 +13,13 @@ scp -q kmod/kszreg/kszreg.c kmod/kszreg/Makefile "$host":/usr/src/napi-kszreg/
 ssh "$host" 'cd /usr/src/napi-kszreg && make -s >/dev/null 2>&1 &&
 	install -m 644 kszreg.ko /usr/lib/napi-switch/kszreg-$(uname -r).ko && echo "kszreg: built for $(uname -r)" ||
 	echo "kszreg: build FAILED (linux-headers-$(uname -r) installed?) - RMII clock fix unavailable"'
+# MRP ring daemon (needs a kernel with CONFIG_BRIDGE_MRP, see ../kernel).
+scp -q deploy/mrp-build.sh "$host":/tmp/mrp-build.sh
+ssh "$host" 'bash /tmp/mrp-build.sh || echo "mrp: build FAILED - MRP unavailable"'
+scp -q deploy/napi-mrp.service "$host":/etc/systemd/system/napi-mrp.service
+# Never restart a running mrp_server here: it clears the kernel rings and
+# leaves a closed ring without MRP or STP until napi-switchd restores it.
+ssh "$host" 'systemctl daemon-reload && systemctl enable --now -q napi-mrp'
 scp -q deploy/napi-switchd "$host":/usr/local/sbin/napi-switchd.new
 scp -q deploy/napi-switchd.service "$host":/etc/systemd/system/napi-switchd.service
 ssh "$host" 'mv /usr/local/sbin/napi-switchd.new /usr/local/sbin/napi-switchd && systemctl daemon-reload &&

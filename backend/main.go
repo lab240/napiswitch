@@ -51,7 +51,9 @@ func main() {
 	dry := flag.Bool("dry-run", false, "log commands instead of executing them")
 	rmiiFix := flag.Bool("rmii-fix", true, "TEMPORARY board-bug workaround: switch the KSZ CPU port to the SoC's RMII clock (no-op once R29 is reworked)")
 	kszMod := flag.String("kszreg-module", "/usr/lib/napi-switch/kszreg-%s.ko", "one-shot register module (%s = kernel release)")
+	mrp := flag.String("mrp", mrpCLI, "mrp_server client (Microchip mrp); MRP is unavailable without it")
 	flag.Parse()
+	mrpCLI = *mrp
 
 	l := log.New(os.Stderr, "", 0)
 	token := ""
@@ -73,6 +75,7 @@ func main() {
 		l.Fatalf("start: %v", err)
 	}
 	api := &API{m: m, token: token, version: version}
+	go m.WatchMRP(time.Second)
 	if *rmiiFix {
 		f := &rmiiFixer{r: m.r, log: l, regmaps: "/sys/kernel/debug/regmap", devtree: "/sys/class/net", module: *kszMod,
 			conduit: func() string {

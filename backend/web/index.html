@@ -185,13 +185,13 @@ pre.cmds { background: var(--panel2); border: 1px solid var(--line); border-radi
 "use strict";
 const API = "/api/v1";
 const TABS = [
-  ["ports", "Порты"], ["vlan", "VLAN"], ["net", "Сеть"], ["stp", "STP"], ["fdb", "MAC-таблица"],
+  ["ports", "Порты"], ["vlan", "VLAN"], ["net", "Сеть"], ["stp", "STP / MRP"], ["fdb", "MAC-таблица"],
   ["mcast", "Мультикаст"], ["mirror", "Зеркалирование"], ["system", "Система"], ["log", "Журнал"],
 ];
 const SPEED_LABEL = { auto: "Авто", "1000full": "1000 полный", "100full": "100 полный", "100half": "100 полу", "10full": "10 полный", "10half": "10 полу" };
 const STP_LABEL = { forwarding: ["ok", "пересылка"], blocking: ["warn", "блокировка"], listening: ["warn", "прослушивание"], learning: ["warn", "обучение"], disabled: ["", "выключен"] };
 
-const S = { token: "", caps: null, sys: null, ports: [], view: null, draft: null, tab: "ports", offset: 0, stp: null, fdb: null, mcast: null, events: [], counters: null, applyConfirm: 60, applySave: true, fdbFilter: { port: "", vlan: "", type: "" } };
+const S = { token: "", caps: null, sys: null, ports: [], view: null, draft: null, tab: "ports", offset: 0, stp: null, mrp: null, fdb: null, mcast: null, events: [], counters: null, applyConfirm: 60, applySave: true, fdbFilter: { port: "", vlan: "", type: "" } };
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -299,7 +299,7 @@ async function loadStatus() {
   S.sys = sys; S.ports = ports;
 }
 async function loadTabData() {
-  if (S.tab === "stp") S.stp = await api("GET", "/stp");
+  if (S.tab === "stp") [S.stp, S.mrp] = await Promise.all([api("GET", "/stp"), api("GET", "/mrp")]);
   if (S.tab === "fdb") {
     const q = new URLSearchParams(Object.entries(S.fdbFilter).filter(([, v]) => v)).toString();
     S.fdb = await api("GET", "/fdb" + (q ? "?" + q : ""));
@@ -479,11 +479,14 @@ function linkCell(p) {
   const sqi = l.sqi_max > 0 ? ` <span class="chip ${l.sqi < l.sqi_max - 2 ? "warn" : ""}" title="Качество сигнала в кабеле">SQI ${l.sqi}/${l.sqi_max}</span>` : "";
   return `<span class="dot ok"></span>${l.speed} ${l.duplex === "full" ? "полный" : "полу"}${sqi}`;
 }
+// A ring port's forwarding state is set by MRP instead of STP.
+const ringPort = (n) => { const r = S.draft.mrp; return !!r && (r.primary === n || r.secondary === n); };
 function stpCell(p) {
   if (!p?.bridged) return `<span class="note">вне моста</span>`;
-  if (!S.draft.bridge.stp.enabled) return `<span class="note">STP выкл.</span>`;
+  const ring = ringPort(p.name);
+  if (!S.draft.bridge.stp.enabled && !ring) return `<span class="note">STP выкл.</span>`;
   const [c, t] = STP_LABEL[p.stp_state] || ["", p.stp_state || "—"];
-  return `<span class="chip ${c}">${esc(t)}</span>`;
+  return `<span class="chip ${c}">${ring ? "MRP: " : ""}${esc(t)}</span>`;
 }
 function updateLive() {
   for (const p of S.ports) {
@@ -492,7 +495,7 @@ function updateLive() {
     const c = document.getElementById("fp-" + p.name); if (c) c.outerHTML = frontPort(p);
   }
   { const c = document.getElementById("fp-wan"); if (c) c.closest(".wanblk").outerHTML = frontWAN(); }
-  if (S.tab === "stp") { const el = $("#stp-live"); if (el) el.innerHTML = stpLive(); }
+  if (S.tab === "stp") { const el = $("#stp-live"); if (el) el.innerHTML = stpLive(); const m = $("#mrp-live"); if (m) m.innerHTML = mrpLive(); }
   if (S.tab === "fdb") { const el = $("#fdb-live"); if (el) el.innerHTML = fdbLive(); }
   if (S.tab === "mcast") { const el = $("#mc-live"); if (el) el.innerHTML = mcastLive(); }
   if (S.tab === "log") { $("#view").innerHTML = viewLog(); }
@@ -528,8 +531,9 @@ function speedText(speed, duplex) {
 }
 function frontPort(p) {
   const d = S.draft.ports[p.name];
-  const stpBlk = p.bridged && S.draft.bridge.stp.enabled && p.stp_state === "blocking";
-  const s = !p.enabled ? "выключен" : stpBlk ? "STP блокирует" : p.link?.up ? speedText(p.link.speed, p.link.duplex) : "нет линка";
+  const ring = ringPort(p.name);
+  const stpBlk = p.bridged && (S.draft.bridge.stp.enabled || ring) && p.stp_state === "blocking";
+  const s = !p.enabled ? "выключен" : stpBlk ? (ring ? "MRP блокирует" : "STP блокирует") : p.link?.up ? speedText(p.link.speed, p.link.duplex) : "нет линка";
   const title = `${p.name}${d?.description ? " — " + d.description : ""}: ${s}. Нажмите, чтобы открыть настройки порта`;
   return `<button class="jack ${p.enabled ? "" : "off"}" id="fp-${esc(p.name)}" data-port="${esc(p.name)}" title="${esc(title)}">${jackSVG(p)}
     <span class="lbl">${esc(p.name)}</span><span class="sub ${stpBlk ? "warn" : ""}">${esc(s)}</span><span class="sub">${esc(d?.description || "")}</span></button>`;
@@ -754,15 +758,62 @@ function viewSTP() {
   const b = S.draft.bridge, st = b.stp;
   const prio = []; for (let i = 0; i <= 61440; i += 4096) prio.push(i);
   return `<div class="grid2"><div class="card"><h2>Настройки</h2><div class="body"><div class="form">
-    <label>STP (802.1D)</label><div class="fld" data-path="bridge.stp.enabled">${sw(`data-path="bridge.stp.enabled"`, st.enabled)}</div>
+    <label>STP (802.1D)</label><div class="fld" data-path="bridge.stp.enabled">${sw(`data-path="bridge.stp.enabled"`, st.enabled, !!S.draft.mrp)}${S.draft.mrp ? ` <span class="note">выключен: работает MRP</span>` : ""}</div>
     <label>Приоритет моста</label><div><select data-path="bridge.stp.priority" data-type="int">${prio.map((p) => `<option ${p === st.priority ? "selected" : ""}>${p}</option>`).join("")}</select> <span class="note">меньше — больше шансов стать корнем</span></div>
     <label>Hello time, с</label><div><input type="number" min="1" max="10" data-type="int" data-path="bridge.stp.hello_time" value="${st.hello_time}"></div>
     <label>Forward delay, с</label><div><input type="number" min="4" max="30" data-type="int" data-path="bridge.stp.forward_delay" value="${st.forward_delay}"></div>
     <label>Max age, с</label><div><input type="number" min="6" max="40" data-type="int" data-path="bridge.stp.max_age" value="${st.max_age}"></div>
     <label>Время жизни MAC, с</label><div><input type="number" min="10" max="1000000" data-type="int" data-path="bridge.ageing_time" value="${b.ageing_time}"></div>
   </div><p class="note">Таймеры должны удовлетворять 2×(forward delay − 1) ≥ max age ≥ 2×(hello + 1). Стоимость и приоритет портов — на вкладке «Порты». RSTP/MSTP драйвер пока не поддерживает.</p></div></div>
-  <div class="card"><h2>Состояние</h2><div class="body" id="stp-live">${stpLive()}</div></div></div>`;
+  <div class="card"><h2>Состояние</h2><div class="body" id="stp-live">${stpLive()}</div></div></div>
+  ${viewMRP()}`;
 }
+
+// ---------- MRP ----------
+const MRP_STATE = {
+  CHK_RC: ["ok", "кольцо замкнуто, запасной порт заблокирован"], CHK_RO: ["warn", "кольцо разомкнуто, оба порта передают"],
+  PRM_UP: ["warn", "линк только на одном порту кольца"], AC_STAT1: ["bad", "нет линка на портах кольца"],
+  PT_IDLE: ["ok", "в кольце, оба порта передают"], PT: ["warn", "линк поднимается"], DE: ["warn", "линк падает"], DE_IDLE: ["warn", "линк только на одном порту"],
+};
+function mrpLive() {
+  const m = S.mrp; if (!m) return `<p class="note">Загрузка…</p>`;
+  if (!m.available) return `<p class="note">MRP недоступен: служба napi-mrp (mrp_server) не отвечает или ядро без CONFIG_BRIDGE_MRP.</p>`;
+  const r = m.running;
+  if (!r) return `<p class="note">Кольцо не настроено.</p>`;
+  const [c, t] = MRP_STATE[r.state] || ["", r.state || "—"];
+  return `<div class="kv">
+    <div>Состояние</div><div><span class="dot ${c}"></span>${esc(t)} <span class="note mono">${esc(r.state)}</span></div>
+    <div>Роль</div><div>${r.role === "mrm" ? "менеджер (MRM)" : "клиент (MRC)"}, кольцо ${r.ring_id}</div>
+    <div>Основной порт сейчас</div><div>${esc(r.primary)}</div>
+    <div>Запасной порт сейчас</div><div>${esc(r.secondary)}</div>
+    <div>Профиль</div><div>${r.profile} мс</div></div>`;
+}
+function viewMRP() {
+  const r = S.draft.mrp, on = !!r, names = bridgedNames();
+  const opts = (sel, list) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(sel) ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const ports = names.map((n) => [n, n]);
+  return `<div class="grid2" style="margin-top:16px"><div class="card"><h2>Кольцо MRP (IEC 62439-2)</h2><div class="body"><div class="form">
+    <label>MRP</label><div>${sw(`id="mrp-on"`, on, S.mrp && !S.mrp.available && !on)} <span class="note">кольцевое резервирование вместо STP</span></div>
+    <label>Роль</label><div><select data-path="mrp.role" ${on ? "" : "disabled"}>${opts(r?.role, [["mrm", "менеджер (MRM)"], ["mrc", "клиент (MRC)"]])}</select></div>
+    <label>Номер кольца</label><div><input type="number" min="1" max="65535" data-type="int" data-path="mrp.ring_id" value="${r?.ring_id ?? 1}" ${on ? "" : "disabled"}></div>
+    <label>Основной порт</label><div><select data-path="mrp.primary" ${on ? "" : "disabled"}>${opts(r?.primary, ports)}</select></div>
+    <label>Запасной порт</label><div><select data-path="mrp.secondary" ${on ? "" : "disabled"}>${opts(r?.secondary, ports)}</select></div>
+    <label>Профиль</label><div><select data-path="mrp.profile" data-type="int" ${on ? "" : "disabled"}>${opts(r?.profile, [[200, "200 мс (тест каждые 20 мс)"], [500, "500 мс (тест каждые 50 мс)"]])}</select></div>
+  </div><p class="note">В кольце один менеджер (MRM), остальные — клиенты (MRC). MRM держит запасной порт заблокированным, пока кольцо замкнуто, и открывает его при обрыве. MRP и STP вместе не работают: при включении MRP STP выключается, при выключении — включается снова. На время перестройки кольца запасной порт отключается на пару секунд. Чип не умеет MRP сам, кольцо ведёт процессор, поэтому профили только 200 и 500 мс.</p></div></div>
+  <div class="card"><h2>Состояние кольца</h2><div class="body" id="mrp-live">${mrpLive()}</div></div></div>`;
+}
+$("#view").addEventListener("change", (e) => {
+  if (e.target.id !== "mrp-on") return;
+  const names = bridgedNames();
+  if (e.target.checked) {
+    S.draft.mrp = { ring_id: 1, role: "mrm", primary: names[0], secondary: names.at(-1), profile: 200 };
+    S.draft.bridge.stp.enabled = false;
+  } else {
+    S.draft.mrp = null;
+    S.draft.bridge.stp.enabled = true; // without either protocol a closed ring is a loop
+  }
+  render(); changed();
+});
 
 // ---------- FDB ----------
 function fdbLive() {

@@ -22,8 +22,10 @@ type Running struct {
 	Ports       map[string]*RunPort `json:"ports"`
 	StaticFDB   []FDBEntry          `json:"static_fdb"`
 	Mirror      *Mirror             `json:"mirror"`
-	Ethers      []string            `json:"ethers"` // physical NICs outside the switch (WAN candidates)
-	Net         *NetState           `json:"net"`    // nil when not read (tests)
+	MRP         *RunMRP             `json:"mrp"`
+	MRPAvail    bool                `json:"mrp_available"` // mrp_server answers
+	Ethers      []string            `json:"ethers"`        // physical NICs outside the switch (WAN candidates)
+	Net         *NetState           `json:"net"`           // nil when not read (tests)
 }
 
 type RunBridge struct {
@@ -229,7 +231,56 @@ func ReadRunning(r Runner, bridge string) (*Running, error) {
 		p.Link = readLink(r, p.Name)
 	}
 	run.Mirror = readMirror(r, run)
+	run.MRP, run.MRPAvail = readMRP(r, bridge)
 	return run, nil
+}
+
+// RunMRP is a ring as mrp_server reports it. Primary is the port the
+// manager currently uses as primary (it may swap them).
+type RunMRP struct {
+	MRP
+	State string `json:"state"` // MRM: AC_STAT1, PRM_UP, CHK_RO, CHK_RC; MRC: DE_IDLE, PT, DE, PT_IDLE
+}
+
+// mrpCLI is mrp_server's client (Microchip mrp). Without it MRP is unavailable.
+var mrpCLI = "/usr/local/sbin/mrp"
+
+// readMRP parses `mrp getmrp`: "key: value" pairs, a new ring at each
+// "bridge:". Only the first ring of bridge is used.
+func readMRP(r Runner, bridge string) (*RunMRP, bool) {
+	out, err := r.Output(mrpCLI, "getmrp")
+	if err != nil {
+		return nil, false
+	}
+	return parseMRP(string(out), bridge), true
+}
+
+func parseMRP(out, bridge string) *RunMRP {
+	f := strings.Fields(out)
+	var rings []map[string]string
+	for i := 0; i+1 < len(f); i++ {
+		k, ok := strings.CutSuffix(f[i], ":")
+		if !ok {
+			continue
+		}
+		if k == "bridge" {
+			rings = append(rings, map[string]string{})
+		}
+		if len(rings) > 0 {
+			rings[len(rings)-1][k] = f[i+1]
+			i++
+		}
+	}
+	for _, m := range rings {
+		if m["bridge"] != bridge {
+			continue
+		}
+		id, _ := strconv.Atoi(m["ring_nr"])
+		prof, _ := strconv.Atoi(m["ring_recv"])
+		return &RunMRP{MRP: MRP{RingID: id, Role: strings.ToLower(m["ring_role"]), Primary: m["pport"],
+			Secondary: m["sport"], Profile: prof}, State: m["ring_state"]}
+	}
+	return nil
 }
 
 func readVLANs(r Runner, run *Running, bridge string) error {
@@ -468,6 +519,10 @@ func ImportConfig(run *Running) *Config {
 	}
 	c.StaticFDB = append([]FDBEntry{}, run.StaticFDB...)
 	c.Mirror = run.Mirror
+	if run.MRP != nil {
+		m := run.MRP.MRP
+		c.MRP = &m
+	}
 	c.Normalize()
 	return c
 }

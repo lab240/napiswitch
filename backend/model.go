@@ -19,6 +19,8 @@ type Config struct {
 	Ports     map[string]*Port `json:"ports"`
 	StaticFDB []FDBEntry       `json:"static_fdb"`
 	Mirror    *Mirror          `json:"mirror"`
+	// MRP is the ring redundancy instance (IEC 62439-2), nil: off.
+	MRP *MRP `json:"mrp"`
 	// Network is the L3 setup (WAN, LAN address, router mode). nil: not
 	// managed by the daemon, netplan's files apply.
 	Network *Network `json:"network"`
@@ -92,6 +94,31 @@ type Mirror struct {
 type MirrorSource struct {
 	Port      string `json:"port"`
 	Direction string `json:"direction"` // rx, tx, both
+}
+
+// MRP is one Media Redundancy Protocol ring. The bridge runs it in
+// software (the KSZ9567 has no MRP offload) through mrp_server.
+type MRP struct {
+	RingID    int    `json:"ring_id"`   // 1..
+	Role      string `json:"role"`      // mrm (manager) or mrc (client)
+	Primary   string `json:"primary"`   // ring port
+	Secondary string `json:"secondary"` // ring port; the one taken down while the ring is (re)built
+	Profile   int    `json:"profile"`   // recovery time profile, ms: 500 or 200
+}
+
+// mrpProfiles are the recovery profiles a software ring can keep: test
+// frames every 50 ms (500) or 20 ms (200). The 30 and 10 ms profiles need
+// 3.5 and 1 ms timers, beyond a kernel workqueue on this CPU.
+var mrpProfiles = []int{500, 200}
+
+func mrpEqual(a, b *MRP) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	// mrp_server swaps primary and secondary at runtime (the first port up
+	// becomes primary), so the ring is the same either way round.
+	samePorts := (a.Primary == b.Primary && a.Secondary == b.Secondary) || (a.Primary == b.Secondary && a.Secondary == b.Primary)
+	return a.RingID == b.RingID && a.Role == b.Role && a.Profile == b.Profile && samePorts
 }
 
 var speedModes = map[string]struct {
@@ -341,6 +368,35 @@ func (c *Config) Validate(ports []string) (warnings []string, err error) {
 				bad("mirror source %s: duplicate", s.Port)
 			}
 			srcSeen[s.Port] = true
+		}
+	}
+
+	if r := c.MRP; r != nil {
+		if r.RingID < 1 || r.RingID > 65535 {
+			bad("mrp.ring_id: 1..65535")
+		}
+		if r.Role != "mrm" && r.Role != "mrc" {
+			bad("mrp.role: mrm or mrc")
+		}
+		if !slices.Contains(mrpProfiles, r.Profile) {
+			bad("mrp.profile: 500 or 200 (ms)")
+		}
+		for _, f := range []struct{ name, port string }{{"primary", r.Primary}, {"secondary", r.Secondary}} {
+			switch pt := c.Ports[f.port]; {
+			case !known[f.port]:
+				bad("mrp.%s %q: no such port", f.name, f.port)
+			case pt != nil && !pt.Enabled:
+				bad("mrp.%s %s: port is disabled", f.name, f.port)
+			}
+			if m := c.Mirror; m != nil && m.Dest == f.port {
+				bad("mrp.%s %s: is the mirror destination", f.name, f.port)
+			}
+		}
+		if r.Primary == r.Secondary {
+			bad("mrp: primary and secondary must differ")
+		}
+		if b.STP.Enabled {
+			bad("mrp: the kernel runs either STP or MRP on a bridge - set bridge.stp.enabled false")
 		}
 	}
 

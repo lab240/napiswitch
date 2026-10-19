@@ -38,6 +38,30 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 	br := o.Bridge
 	wb, rb := want.Bridge, run.Bridge
 
+	// MRP and STP exclude each other in the kernel, so a ring change passes
+	// through a moment with neither: the secondary ring port(s) stay down
+	// from before the old ring goes until the end of the plan.
+	var haveMRP *MRP
+	if run.MRP != nil {
+		haveMRP = &run.MRP.MRP
+	}
+	var ringDown []string
+	if !mrpEqual(want.MRP, haveMRP) {
+		for _, r := range []*MRP{haveMRP, want.MRP} {
+			if r != nil && !slices.Contains(ringDown, r.Secondary) {
+				ringDown = append(ringDown, r.Secondary)
+			}
+		}
+		for _, n := range ringDown {
+			if rp := run.Ports[n]; rp != nil && rp.Up {
+				cmds = append(cmds, cmd("ip", "link", "set", "dev", n, "down"))
+			}
+		}
+		if haveMRP != nil {
+			cmds = append(cmds, cmd(mrpCLI, "delmrp", "bridge", br, "ring_nr", strconv.Itoa(haveMRP.RingID)))
+		}
+	}
+
 	// Bridge globals. Times are centiseconds for iproute2.
 	var g []string
 	add := func(changed bool, k, v string) {
@@ -57,6 +81,10 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 	add(wb.IGMP.Querier != rb.Querier, "mcast_querier", b01(wb.IGMP.Querier))
 	if len(g) > 0 {
 		cmds = append(cmds, cmd(append([]string{"ip", "link", "set", "dev", br, "type", "bridge"}, g...)...))
+	}
+	if r := want.MRP; r != nil && !mrpEqual(r, haveMRP) {
+		cmds = append(cmds, cmd(mrpCLI, "addmrp", "bridge", br, "ring_nr", strconv.Itoa(r.RingID),
+			"pport", r.Primary, "sport", r.Secondary, "ring_role", r.Role, "ring_recv", strconv.Itoa(r.Profile)))
 	}
 
 	resync := o.ResyncVLANs
@@ -138,6 +166,11 @@ func Plan(want *Config, run *Running, o PlanOpts) []Cmd {
 	cmds = append(cmds, planFDB(want, run)...)
 	cmds = append(cmds, planMirror(want.Mirror, run.Mirror)...)
 	cmds = append(cmds, planNetwork(want, run, o)...)
+	for _, n := range ringDown {
+		if wp := want.Ports[n]; wp != nil && wp.Enabled && run.Ports[n] != nil {
+			cmds = append(cmds, cmd("ip", "link", "set", "dev", n, "up"))
+		}
+	}
 	return cmds
 }
 
