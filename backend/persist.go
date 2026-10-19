@@ -85,8 +85,12 @@ func RenderDropins(c *Config, bridge string, unit func(kind, ifname string) stri
 	b := c.Bridge
 	var s strings.Builder
 	fmt.Fprintf(&s, dropinHeader, cfgPath)
+	// MRP needs mrp_server and napi-switchd, which start after networkd has
+	// brought the ring ports up: boot with STP so a closed ring is never a
+	// loop, the daemon then swaps STP for MRP (secondary port held down).
+	stp := b.STP.Enabled || c.MRP != nil
 	fmt.Fprintf(&s, "\n[Bridge]\nVLANFiltering=%s\nSTP=%s\nPriority=%d\nHelloTimeSec=%d\nForwardDelaySec=%d\nMaxAgeSec=%d\nAgeingTimeSec=%d\nMulticastSnooping=%s\nMulticastQuerier=%s\n",
-		yesno(b.VLANAware), yesno(b.STP.Enabled), b.STP.Priority, b.STP.HelloTime, b.STP.ForwardDelay, b.STP.MaxAge,
+		yesno(b.VLANAware), yesno(stp), b.STP.Priority, b.STP.HelloTime, b.STP.ForwardDelay, b.STP.MaxAge,
 		b.AgeingTime, yesno(b.IGMP.Snooping), yesno(b.IGMP.Querier))
 	if b.VLANAware {
 		// No implicit VLAN 1 on every port: membership is fully explicit.

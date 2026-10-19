@@ -172,6 +172,22 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// A closed ring must not boot as a loop: MRP comes up only with
+// napi-switchd, so networkd starts the bridge with STP.
+func TestRenderDropinsMRPBootsWithSTP(t *testing.T) {
+	c := DefaultConfig(testPorts)
+	c.Bridge.STP.Enabled = false
+	unit := func(kind, n string) string { return "10-netplan-" + n + "." + kind }
+	br := "10-netplan-br0.netdev.d/" + dropinName
+	if got := RenderDropins(c, "br0", unit, "x")[br]; !strings.Contains(got, "STP=no") {
+		t.Errorf("no MRP, STP off: want STP=no in:\n%s", got)
+	}
+	c.MRP = &MRP{RingID: 1, Role: "mrm", Primary: "lan1", Secondary: "lan3", Profile: 200}
+	if got := RenderDropins(c, "br0", unit, "x")[br]; !strings.Contains(got, "STP=yes") {
+		t.Errorf("MRP: want STP=yes at boot in:\n%s", got)
+	}
+}
+
 func TestRenderDropins(t *testing.T) {
 	c := DefaultConfig(testPorts)
 	c.Bridge.VLANAware = true
