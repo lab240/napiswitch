@@ -1,0 +1,30 @@
+// pstore/ramoops for NAPI-Switch (RK3308, 512 MiB): the kernel keeps the
+// panic/oops log in this RAM block across a warm reboot, systemd-pstore
+// then saves it to /var/lib/systemd/pstore. 0x10000000 is not used by
+// u-boot (kernel/initrd/fdt/scripts below 0x0a000000, u-boot itself at
+// the top of RAM) nor by firmware.
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			reserved-memory {
+				#address-cells = <2>;
+				#size-cells = <2>;
+				ranges;
+
+				ramoops@10000000 {
+					compatible = "ramoops";
+					reg = <0x0 0x10000000 0x0 0x100000>;
+					record-size = <0x20000>;
+					console-size = <0x0>;
+					ftrace-size = <0x0>;
+					pmsg-size = <0x0>;
+					ecc-size = <16>;
+				};
+			};
+		};
+	};
+};

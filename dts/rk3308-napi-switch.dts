@@ -23,6 +23,26 @@
 		stdout-path = "serial0:1500000n8";
 	};
 
+	/* pstore/ramoops: panic/oops log kept across the warm reboot, saved by
+	 * systemd-pstore to /var/lib/systemd/pstore. 0x10000000 is free of
+	 * u-boot (loads below 0x0a000000, relocates to the top of RAM).
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		ramoops@10000000 {
+			compatible = "ramoops";
+			reg = <0x0 0x10000000 0x0 0x100000>;
+			record-size = <0x20000>;
+			console-size = <0x0>;
+			ftrace-size = <0x0>;
+			pmsg-size = <0x0>;
+			ecc-size = <16>;
+		};
+	};
+
 	leds {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
