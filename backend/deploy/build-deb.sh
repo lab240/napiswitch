@@ -1,10 +1,11 @@
 #!/bin/bash
-# Build the NAPI-Switch packages for arm64 (Debian trixie boards):
+# Build the NAPI-Switch packages (Debian trixie boards, Ubuntu 24.04+ test VMs):
 #   napi-switchd_<ver>_arm64.deb  REST API + web UI + health watchdog
-#   napi-mrp_<ver>_arm64.deb      Microchip mrp_server + mrp client (MRP ring daemon)
-# Usage: deploy/build-deb.sh [outdir]   (default: deploy/deb)
-# Needs: go (GOTOOLCHAIN=auto fetches the version in go.mod), aarch64-linux-gnu-gcc
-# (or a native arm64 gcc), cmake, git, curl, xz, dpkg-deb. No root: the arm64
+#   napi-mrp_<ver>_<arch>.deb     Microchip mrp_server + mrp client (MRP ring daemon),
+#                                 arm64 for the board, amd64 for MRP test VMs
+# Usage: deploy/build-deb.sh [outdir]   (default: deploy/deb; MRP_ARCHES="arm64 amd64")
+# Needs: go (GOTOOLCHAIN=auto fetches the version in go.mod), gcc for each arch
+# (native or <triplet>-gcc), cmake, git, curl, xz, dpkg-deb. No root: the
 # libraries for mrp_server come from pinned Debian trixie packages unpacked into
 # a private sysroot, so the binaries link against what the board has.
 set -e
@@ -18,7 +19,7 @@ mkdir -p "$out" "$work"
 # MRP daemon sources, pinned (same as mrp-build.sh).
 CFM=7a50f4adcccf2d2e910816ea6d78446fea8fe7d8
 MRP=177717ee893d5ccc6e31147b1b8a720c9b798b81
-# Debian trixie arm64 libraries mrp_server builds against.
+# Debian trixie libraries mrp_server builds against.
 DEBS="libev4t64 libev-dev libmnl0 libmnl-dev libnl-3-200 libnl-3-dev libnl-genl-3-200 libnl-genl-3-dev"
 DEBIAN=https://deb.debian.org/debian
 
@@ -27,10 +28,15 @@ rev=$(git rev-parse --short HEAD)
 VER=0.1.0~git.$rev
 MRPVER=0~git.${MRP:0:7}
 
-case $(uname -m) in
-aarch64) CC=${CC:-gcc} ;;
-*) CC=${CC:-aarch64-linux-gnu-gcc} ;;
-esac
+MRP_ARCHES=${MRP_ARCHES:-arm64 amd64}
+
+# GNU triplet and C compiler (native gcc when the host is that arch).
+triplet() { case $1 in arm64) echo aarch64-linux-gnu ;; amd64) echo x86_64-linux-gnu ;; esac; }
+ccfor() {
+	local t
+	t=$(triplet "$1")
+	if [ "$(gcc -dumpmachine 2>/dev/null)" = "$t" ]; then echo gcc; else echo "$t-gcc"; fi
+}
 
 ##############################
 # napi-switchd
@@ -98,11 +104,15 @@ dpkg-deb --root-owner-group --build "$pkg" "$out/napi-switchd_${VER}_arm64.deb" 
 ##############################
 # napi-mrp: sysroot from trixie
 ##############################
-echo "napi-mrp $MRPVER"
-sysroot=$work/sysroot
-idx=$work/Packages-trixie-arm64
+build_mrp() {
+arch=$1
+CC=$(ccfor "$arch")
+command -v "$CC" >/dev/null || { echo "napi-mrp $arch: no $CC, skipped" >&2; return 0; }
+echo "napi-mrp $MRPVER $arch"
+sysroot=$work/sysroot-$arch
+idx=$work/Packages-trixie-$arch
 if [ ! -s "$idx" ] || [ -n "$(find "$idx" -mtime +7)" ]; then
-	curl -fsSL "$DEBIAN/dists/trixie/main/binary-arm64/Packages.xz" | xz -d >"$idx.new"
+	curl -fsSL "$DEBIAN/dists/trixie/main/binary-$arch/Packages.xz" | xz -d >"$idx.new"
 	mv "$idx.new" "$idx"
 fi
 rm -rf "$sysroot" && mkdir -p "$sysroot" "$work/debs"
@@ -128,8 +138,8 @@ for r in cfm mrp; do
 done
 git -C "$src/cfm" fetch -q && git -C "$src/cfm" checkout -q $CFM
 git -C "$src/mrp" fetch -q && git -C "$src/mrp" checkout -q $MRP
-lib=$sysroot/usr/lib/aarch64-linux-gnu
-cross=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_C_COMPILER="$CC"
+lib=$sysroot/usr/lib/$(triplet "$arch")
+cross=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$(triplet "$arch" | cut -d- -f1)" -DCMAKE_C_COMPILER="$CC"
 	-DCMAKE_BUILD_TYPE=Release
 	-DLibNL_INCLUDE_DIR="$sysroot/usr/include/libnl3" -DLibNL_LIBRARY="$lib/libnl-3.so"
 	-DLibNL_GENL_LIBRARY="$lib/libnl-genl-3.so"
@@ -143,7 +153,7 @@ cmake -S "$src/mrp" -B "$src/mrp/build" "${cross[@]}" \
 	-DLibCFM_INCLUDE_DIR="$src/cfm" -DLibCFM_LIBRARY="$src/cfm/build/libcfm_netlink.a" >/dev/null
 make -s -C "$src/mrp/build" -j"$(nproc)" mrp mrp_server
 
-pkg=$work/napi-mrp
+pkg=$work/napi-mrp-$arch
 rm -rf "$pkg" && mkdir -p "$pkg/DEBIAN" "$pkg/usr/sbin" "$pkg/usr/lib/systemd/system"
 install -m 755 "$src/mrp/build/mrp_server" "$src/mrp/build/mrp" "$pkg/usr/sbin/"
 "${CC%gcc}strip" "$pkg/usr/sbin/mrp_server" "$pkg/usr/sbin/mrp" 2>/dev/null || strip "$pkg/usr/sbin/"* 2>/dev/null || true
@@ -170,7 +180,7 @@ Package: napi-mrp
 Version: $MRPVER
 Section: net
 Priority: optional
-Architecture: arm64
+Architecture: $arch
 Depends: $deps
 Maintainer: NapiLab <info@napilab.ru>
 Homepage: https://github.com/microchip-ung/mrp
@@ -210,6 +220,8 @@ if [ "$1" = remove ] || [ "$1" = purge ]; then
 fi
 EOF
 chmod 755 "$pkg/DEBIAN/postinst" "$pkg/DEBIAN/prerm" "$pkg/DEBIAN/postrm"
-dpkg-deb --root-owner-group --build "$pkg" "$out/napi-mrp_${MRPVER}_arm64.deb" >/dev/null
+dpkg-deb --root-owner-group --build "$pkg" "$out/napi-mrp_${MRPVER}_${arch}.deb" >/dev/null
+}
+for a in $MRP_ARCHES; do build_mrp "$a"; done
 
-ls -1 "$out"/napi-switchd_"${VER}"_arm64.deb "$out"/napi-mrp_"${MRPVER}"_arm64.deb
+ls -1 "$out"/napi-switchd_"${VER}"_arm64.deb "$out"/napi-mrp_"${MRPVER}"_*.deb
