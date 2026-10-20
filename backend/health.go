@@ -21,6 +21,10 @@ import (
 //   - every port the bridge holds in blocking is blocked in the chip too
 //     (KSZ port MSTP state register): the switch was not reset behind
 //     Linux's back, which would open every blocked port into a loop;
+//   - the chip still has the driver's setup: tail tagging on the CPU port
+//     (KSZ port control 0, bit 2). A chip reset (seen on board 1 after link
+//     events) wipes it, the CPU path goes dead and an open MRP ring forwards
+//     on both ports: the port-state check alone passes then;
 //   - with a closed MRP ring (CHK_RC) the CPU keeps receiving: MRP_Test
 //     frames alone are ~40/s, so a stalled conduit means a dead CPU path.
 //
@@ -37,6 +41,9 @@ import (
 const (
 	kszPortMSTPState = 0x0b04 // port N: (N+1)<<12 | 0x0b04, MSTP entry 0
 	kszPortTxEnable  = 0x04
+	kszPortCtrl0     = 0x0020 // port N: (N+1)<<12 | 0x0020
+	kszPortTailTag   = 0x04
+	kszPorts         = 7
 	brStateBlocking  = "4"
 )
 
@@ -97,6 +104,9 @@ func (h *health) probe() error {
 	if err := h.checkPortStates(); err != nil {
 		return err
 	}
+	if err := h.checkChipSetup(); err != nil {
+		return err
+	}
 	return h.checkCPURx()
 }
 
@@ -129,6 +139,36 @@ func (h *health) checkPortStates() error {
 			if b, _ := bad(); b {
 				return fmt.Errorf("%s is blocking in the bridge but forwards in the switch (0x%04x): switch reset?", n, reg)
 			}
+		}
+	}
+	return nil
+}
+
+// checkChipSetup: some port (the CPU port) must have tail tagging on. After
+// a chip reset none has; the setup is re-read once before failing.
+func (h *health) checkChipSetup() error {
+	dir, _, err := kszRegmap(h.regmaps)
+	if err != nil {
+		return nil
+	}
+	tagged := func() (bool, error) {
+		for i := 0; i < kszPorts; i++ {
+			v, err := readReg(dir, (i+1)<<12|kszPortCtrl0)
+			if err != nil {
+				return false, err
+			}
+			if v&kszPortTailTag != 0 {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if ok, err := tagged(); err != nil {
+		return fmt.Errorf("ksz port control: %v", err)
+	} else if !ok {
+		time.Sleep(300 * time.Millisecond)
+		if ok, _ := tagged(); !ok {
+			return fmt.Errorf("no ksz port has tail tagging (0xN020 bit 2): switch chip reset, driver setup lost")
 		}
 	}
 	return nil

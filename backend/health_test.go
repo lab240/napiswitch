@@ -18,8 +18,13 @@ func (okRunner) Output(...string) ([]byte, error) { return nil, nil }
 func (okRunner) Exec(Cmd) error                   { return nil }
 
 // fakeSwitch: /sys/class/net with br0 + lan1 (p0) and a ksz regmap whose
-// MSTP state register of port 1 is mstp.
+// MSTP state register of port 1 is mstp; the CPU port (6) has tail tagging.
 func fakeSwitch(t *testing.T, brState string, mstp int) *health {
+	t.Helper()
+	return fakeSwitchRegs(t, brState, map[int]int{0x1b04: mstp, 0x6020: kszPortTailTag})
+}
+
+func fakeSwitchRegs(t *testing.T, brState string, regs map[int]int) *health {
 	t.Helper()
 	d := t.TempDir()
 	net, rm := filepath.Join(d, "net"), filepath.Join(d, "regmap", "spi2.0-8")
@@ -37,12 +42,8 @@ func fakeSwitch(t *testing.T, brState string, mstp int) *health {
 		}
 	}
 	var b strings.Builder
-	for r := 0; r <= 0x1b05; r++ {
-		v := 0
-		if r == 0x1b04 {
-			v = mstp
-		}
-		fmt.Fprintf(&b, "%06x: %02x\n", r, v)
+	for r := 0; r <= kszPorts<<12|kszPortCtrl0; r++ {
+		fmt.Fprintf(&b, "%06x: %02x\n", r, regs[r])
 	}
 	if err := os.MkdirAll(rm, 0o755); err != nil {
 		t.Fatal(err)
@@ -65,6 +66,18 @@ func TestHealthPortStates(t *testing.T) {
 	// Chip reset to defaults: the port forwards although the bridge blocks it.
 	if err := fakeSwitch(t, "4", 0x06).probe(); err == nil || !strings.Contains(err.Error(), "lan1") {
 		t.Errorf("blocking in bridge, forwarding in chip: want error, got %v", err)
+	}
+}
+
+func TestHealthChipReset(t *testing.T) {
+	// Defaults after a chip reset: no tail tagging anywhere. The ring is open
+	// (CHK_RO), both ports forward in bridge and chip: only this check fails.
+	err := fakeSwitchRegs(t, "3", map[int]int{0x1b04: 0x06}).probe()
+	if err == nil || !strings.Contains(err.Error(), "tail tagging") {
+		t.Errorf("chip reset: want tail-tagging error, got %v", err)
+	}
+	if err := fakeSwitchRegs(t, "3", map[int]int{0x1b04: 0x06, 0x6020: 0x07}).probe(); err != nil {
+		t.Errorf("tail tagging on: %v", err)
 	}
 }
 
