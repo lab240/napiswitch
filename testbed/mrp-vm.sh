@@ -1,18 +1,26 @@
 #!/bin/bash
-# MRP test node on an Ubuntu (24.04+) VM or PC: a Linux bridge with two ring
-# ports and Microchip mrp_server as MRC (or MRM), for an MRP ring with a
-# NAPI-Switch. Runtime only: nothing survives a reboot, `down` undoes it.
+# Ring node for an MRP test with a NAPI-Switch (MRM) on a Linux PC/VM/Live USB:
+# a bridge of two ring ports. Runtime only: nothing survives a reboot, `down`
+# undoes it.
 #
-#   mrp-vm.sh install                 napilab repo + napi-mrp (mrp_server), iproute2, iperf3
-#   mrp-vm.sh up IF1 IF2 [options]    bridge IF1+IF2, MRP ring, ports up last
-#       --role mrc|mrm   (mrc)        --ring N (1)        --profile 200|500 (200)
+# --role none (default): plain bridge, MRP-unaware. It forwards the MRP frames,
+# the NAPI-Switch MRM does all the work. Works on any kernel.
+# --role mrc|mrm: runs MRP here (Microchip mrp_server). A stock kernel refuses
+# it on ordinary NICs (EOPNOTSUPP: bridge MRP needs a switchdev driver that
+# takes the ring, like the NAPI-Switch ksz patch); needs a kernel with a
+# software fallback (../kernel/br_mrp-sw-fallback.patch and more).
+#
+#   mrp-vm.sh install [--mrp]         iproute2 iperf3 tcpdump ethtool; --mrp: + napilab repo, napi-mrp
+#   mrp-vm.sh up IF1 IF2 [options]    bridge IF1+IF2 (+ MRP ring), ports up last
+#       --role none|mrc|mrm (none)        --ring N (1)        --profile 200|500 (200)
 #       --ip CIDR | --dhcp            address on the bridge for ping/iperf
 #       --bridge NAME    (mrpbr0)
 #   mrp-vm.sh status                  ring and port states
 #   mrp-vm.sh down                    remove the ring and the bridge
 #
-# Ring ports must be free: no IP, not managed by netplan/NetworkManager
-# (keep the VM's management NIC separate). Close the ring cable only after
+# Ring ports: any IP on them is flushed, NetworkManager is told to leave
+# them alone. Keep a separate management NIC (Wi-Fi is fine): the NIC with
+# the default route or this SSH session is refused. Close the ring cable only after
 # `up`: the NAPI-Switch side must be MRM with its secondary port blocked.
 # In a VM the ring NICs should be passed-through USB adapters: a virtio NIC
 # stays "up" when the host cable is pulled, so this node cannot report the
@@ -30,6 +38,11 @@ kernel_has_mrp() {
 
 case $1 in
 install)
+	DEBIAN_FRONTEND=noninteractive apt-get -qq install -y iproute2 iperf3 tcpdump ethtool >/dev/null
+	if [ "$2" != --mrp ]; then
+		echo "mrp-vm: tools installed (for --role mrc|mrm: $0 install --mrp)"
+		exit 0
+	fi
 	kernel_has_mrp || die "kernel $(uname -r) has no CONFIG_BRIDGE_MRP"
 	arch=$(dpkg --print-architecture)
 	if [ ! -f /usr/share/keyrings/napilab.gpg ]; then
@@ -48,7 +61,7 @@ up)
 	p=$1 s=$2
 	[ -n "$p" ] && [ -n "$s" ] || die "usage: $0 up IF1 IF2 [--role mrc|mrm] [--ring N] [--profile 200|500] [--ip CIDR|--dhcp] [--bridge NAME]"
 	shift 2
-	role=mrc ring=1 prof=200 ip= dhcp= br=mrpbr0
+	role=none ring=1 prof=200 ip= dhcp= br=mrpbr0
 	while [ $# -gt 0 ]; do
 		case $1 in
 		--role) role=$2; shift ;;
@@ -61,28 +74,50 @@ up)
 		esac
 		shift
 	done
-	case $role in mrc|mrm) ;; *) die "--role mrc|mrm" ;; esac
+	case $role in none|mrc|mrm) ;; *) die "--role none|mrc|mrm" ;; esac
 	case $prof in 200|500) ;; *) die "--profile 200|500" ;; esac
 	[ -e "$state" ] && die "already up ($(cat $state)), run down first"
-	kernel_has_mrp || die "kernel $(uname -r) has no CONFIG_BRIDGE_MRP"
+	[ $role = none ] || kernel_has_mrp || die "kernel $(uname -r) has no CONFIG_BRIDGE_MRP"
+	# Never take the NIC we are managed through (default route, this SSH session).
+	mgmt=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')
+	sshdev=
+	if [ -n "$SSH_CONNECTION" ]; then
+		sship=$(echo "$SSH_CONNECTION" | awk '{print $3}')
+		sshdev=$(ip -o addr show | awk -v a="$sship" '{split($4,x,"/")} x[1]==a {print $2}')
+	fi
 	for i in "$p" "$s"; do
 		[ -d /sys/class/net/$i ] || die "no interface $i"
-		[ -z "$(ip -o addr show dev "$i" scope global)" ] || die "$i has an IP address (management NIC?)"
+		[ "$i" != "$mgmt" ] || die "$i carries the default route (management NIC?)"
+		[ "$i" != "$sshdev" ] || die "$i carries this SSH session"
 		[ ! -e /sys/class/net/$i/master ] || die "$i is already in $(basename "$(readlink /sys/class/net/$i/master)")"
 	done
-	systemctl is-active -q napi-mrp || systemctl start napi-mrp
-	sleep 1
-	$MRP getmrp >/dev/null 2>&1 || die "mrp_server does not answer ($MRP getmrp)"
+	# NetworkManager (Ubuntu Desktop / Live) would run DHCP on the ring ports.
+	nm=
+	if command -v nmcli >/dev/null && systemctl is-active -q NetworkManager; then
+		nm=1
+		for i in "$p" "$s"; do nmcli device set "$i" managed no; done
+	fi
+	for i in "$p" "$s"; do ip addr flush dev "$i"; done
+	if [ $role != none ]; then
+		systemctl is-active -q napi-mrp || systemctl start napi-mrp
+		sleep 1
+		$MRP getmrp >/dev/null 2>&1 || die "mrp_server does not answer ($MRP getmrp)"
+	fi
 
 	# Ports stay down until the ring exists: no loop through this node meanwhile.
 	ip link set dev "$p" down
 	ip link set dev "$s" down
 	ip link add name "$br" type bridge stp_state 0 vlan_filtering 0
-	echo "$br $p $s $ring" >$state
+	echo "$br $p $s $ring $role ${nm:-}" >$state
+	[ -z "$nm" ] || nmcli device set "$br" managed no 2>/dev/null || true
 	ip link set dev "$p" master "$br"
 	ip link set dev "$s" master "$br"
 	ip link set dev "$br" up
-	$MRP addmrp bridge "$br" ring_nr "$ring" pport "$p" sport "$s" ring_role "$role" ring_recv "$prof"
+	if [ $role != none ] && ! $MRP addmrp bridge "$br" ring_nr "$ring" pport "$p" sport "$s" ring_role "$role" ring_recv "$prof"; then
+		echo "mrp-vm: addmrp failed (stock kernel on ordinary NICs: use --role none)" >&2
+		"$0" down
+		exit 1
+	fi
 	ip link set dev "$p" up
 	ip link set dev "$s" up
 	if [ -n "$ip" ]; then
@@ -92,30 +127,37 @@ up)
 		elif command -v dhclient >/dev/null; then dhclient -1 "$br"
 		else echo "mrp-vm: no dhcpcd/dhclient, use --ip" >&2; fi
 	fi
-	echo "mrp-vm: $br up, ring $ring $role pport $p sport $s profile $prof"
+	if [ $role = none ]; then echo "mrp-vm: $br up, plain bridge $p + $s (MRP-unaware)"
+	else echo "mrp-vm: $br up, ring $ring $role pport $p sport $s profile $prof"; fi
 	"$0" status
 	;;
 status)
 	[ -e "$state" ] || { echo "mrp-vm: down"; exit 0; }
-	read -r br p s ring <$state
-	$MRP getmrp || true
+	read -r br p s ring role nm <$state
+	echo "role $role"
+	[ "$role" = none ] || $MRP getmrp || true
 	bridge link show master "$br" || true
 	ip -br addr show dev "$br"
 	;;
 down)
 	[ -e "$state" ] || { echo "mrp-vm: down"; exit 0; }
-	read -r br p s ring <$state
+	read -r br p s ring role nm <$state
 	# Secondary down first: never a loop while MRP goes away.
 	ip link set dev "$s" down || true
-	$MRP delmrp bridge "$br" ring_nr "$ring" || true
+	[ "$role" = none ] || $MRP delmrp bridge "$br" ring_nr "$ring" 2>/dev/null || true
 	ip link set dev "$p" nomaster 2>/dev/null || true
 	ip link set dev "$s" nomaster 2>/dev/null || true
 	ip link del dev "$br" || true
 	rm -f $state
-	echo "mrp-vm: $br removed ($p, $s left down)"
+	if [ -n "$nm" ]; then
+		for i in "$p" "$s"; do nmcli device set "$i" managed yes || true; done
+		echo "mrp-vm: $br removed ($s down, ports back to NetworkManager)"
+	else
+		echo "mrp-vm: $br removed ($p, $s left down)"
+	fi
 	;;
 *)
-	sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 	;;
 esac

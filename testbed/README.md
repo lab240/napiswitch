@@ -1,40 +1,43 @@
 # MRP ring test bed
 
-A NAPI-Switch (MRM) and an Ubuntu VM or PC (MRC) in one MRP ring:
+A NAPI-Switch (MRM) and a Linux PC in one ring. The PC is a plain bridge of two NICs
+(MRP-unaware): it forwards the MRP frames, the switch's MRM blocks/unblocks its secondary
+port and does the recovery.
 
 ```
-NAPI-Switch lanX ── host port A ─┐
-                                 VM: mrpbr0 (MRC, mrp_server)
-NAPI-Switch lanY ── host port B ─┘
+NAPI-Switch lanX ── PC NIC 1 ─┐
+                              PC: mrpbr0 (plain bridge)
+NAPI-Switch lanY ── PC NIC 2 ─┘
 ```
 
-Ubuntu's generic kernel has `CONFIG_BRIDGE_MRP=y` (Alpine and Debian kernels do not).
-`napi-mrp` is in repo.napilab.ru for arm64 and amd64.
+Why not MRC on the PC: a stock kernel (Ubuntu has `CONFIG_BRIDGE_MRP=y`) refuses an MRP
+ring on ordinary NICs with `EOPNOTSUPP`: bridge MRP needs a switchdev driver that takes
+the ring (on the NAPI-Switch the ksz patch does it). An MRC needs a kernel with a software
+fallback, or a second NAPI-Switch.
 
-## VM
+## PC
 
-- Ubuntu Server 24.04+ (minimal is enough), three NICs: management (NAT or office LAN)
-  and two ring ports.
-- Ring ports: preferably USB Ethernet adapters passed through to the VM. A virtio/bridged
-  NIC stays up when the host cable is pulled: this node cannot report the break, the MRM
-  sees it only by lost test frames.
-- Ring ports must have no IP and no netplan entry.
+- Ubuntu Desktop Live USB is enough (real NICs, real link-down; nothing written to disk).
+  Management over Wi-Fi or a third NIC: the NIC with the default route or the SSH session
+  is refused as a ring port. NetworkManager is told to leave the ring ports alone.
+- A VM works too, but a virtio NIC stays up when the host cable is pulled.
 
 ```
-sudo ./mrp-vm.sh install
-sudo ./mrp-vm.sh up enx1 enx2 --ip 192.168.1.50/24   # MRC, ring 1, profile 200
+sudo ./mrp-vm.sh install                        # iproute2 iperf3 tcpdump ethtool
+sudo ./mrp-vm.sh up enp0s31f6 enx00e04c221648 --ip 10.9.9.2/24
 sudo ./mrp-vm.sh status
 sudo ./mrp-vm.sh down
 ```
 
-## Switch
+## Order
 
-Ring 1 as MRM on lanX/lanY with the same profile (napi-switchd API or web UI).
-Close the ring cables only when both sides are up.
+1. Switch: ring 1 as MRM on lanX/lanY (napi-switchd API or web UI), profile 200.
+2. PC: `up` (both ports join the bridge).
+3. Plug the two cables: the ring closes through the PC, the MRM blocks its secondary.
 
 ## Tests
 
-- Ring closed: switch secondary blocked, `ring_state` closed on both sides, no storm.
-- Traffic through the ring: `iperf3` and `ping -i 0.01` between a host on the switch and the VM.
-- Pull each cable (switch side, host side) and plug it back: count lost pings, recovery time.
+- Ring closed: `ring_state` closed on the switch, secondary blocked, no storm.
+- Traffic through the ring: `iperf3` and `ping -i 0.01` between a host on the switch and the PC.
+- Pull each cable (switch side, PC side) and plug it back: lost pings, recovery time.
 - Profile 200 vs 500. Reboot the switch with the ring closed.
