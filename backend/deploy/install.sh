@@ -15,6 +15,7 @@ ssh "$host" 'cd /usr/src/napi-kszreg && make -s >/dev/null 2>&1 &&
 	echo "kszreg: build FAILED (linux-headers-$(uname -r) installed?) - RMII clock fix unavailable"'
 # MRP ring daemon (needs a kernel with CONFIG_BRIDGE_MRP, see ../kernel).
 scp -q deploy/mrp-build.sh "$host":/tmp/mrp-build.sh
+ssh "$host" rm -rf /tmp/mrp-patches && scp -qr deploy/mrp-patches "$host":/tmp/mrp-patches
 ssh "$host" 'bash /tmp/mrp-build.sh || echo "mrp: build FAILED - MRP unavailable"'
 scp -q deploy/napi-mrp.service "$host":/etc/systemd/system/napi-mrp.service
 # Never restart a running mrp_server here: it clears the kernel rings and

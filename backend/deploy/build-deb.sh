@@ -26,7 +26,8 @@ DEBIAN=https://deb.debian.org/debian
 [ -z "$(git status --porcelain -- . 2>/dev/null)" ] || echo "WARNING: backend has uncommitted changes" >&2
 rev=$(git rev-parse --short HEAD)
 VER=0.1.0~git.$rev
-MRPVER=0~git.${MRP:0:7}
+# +napiN: our fixes on top of the pinned commit (deploy/mrp-patches).
+MRPVER=0~git.${MRP:0:7}+napi1
 
 MRP_ARCHES=${MRP_ARCHES:-arm64 amd64}
 
@@ -137,7 +138,8 @@ for r in cfm mrp; do
 	[ -d "$src/$r" ] || git clone -q https://github.com/microchip-ung/$r.git "$src/$r"
 done
 git -C "$src/cfm" fetch -q && git -C "$src/cfm" checkout -q $CFM
-git -C "$src/mrp" fetch -q && git -C "$src/mrp" checkout -q $MRP
+git -C "$src/mrp" fetch -q && git -C "$src/mrp" checkout -q -f $MRP
+for p in "$PWD"/deploy/mrp-patches/*.patch; do git -C "$src/mrp" apply "$p"; done
 lib=$sysroot/usr/lib/$(triplet "$arch")
 cross=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR="$(triplet "$arch" | cut -d- -f1)" -DCMAKE_C_COMPILER="$CC"
 	-DCMAKE_BUILD_TYPE=Release

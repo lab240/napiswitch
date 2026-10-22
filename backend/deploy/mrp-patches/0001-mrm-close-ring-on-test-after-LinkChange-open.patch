@@ -1,0 +1,36 @@
+From: NapiLab <info@napilab.ru>
+Subject: [PATCH] mrm: close the ring on a returning MRP_Test after a LinkChange open
+
+The kernel reports a returning MRP_Test only while its ring state is not
+closed. When a MRC's MRP_LinkDown opens the ring before the test frames time
+out, the kernel never reports loss of continuity (it does that only in the
+closed state), both ports keep loc false and every later "test returned"
+report is dropped as a repeat: the MRM stays in CHK_RO with the ring closed
+and the secondary forwarding until the next local link change.
+
+Seen on NAPI-Switch (MRM) with software MRCs: every break of a link next to
+a MRC that the MRC itself reports left the ring in CHK_RO.
+
+diff --git a/state_machine.c b/state_machine.c
+index 0c41cdb..5527da4 100644
+--- a/state_machine.c
++++ b/state_machine.c
+@@ -2296,7 +2296,17 @@ void mrp_port_ring_open(struct mrp_port *p, bool loc)
+ 	    mrp->mra_support != true)
+ 		goto out;
+ 
+-	if (p->loc == loc)
++	/* The kernel reports a returning MRP_Test (loc false) only while the
++	 * ring state it holds is not closed, i.e. while this MRM is not in
++	 * CHK_RC, so such a report always means the ring closed. Do not drop it
++	 * as a repeat: when the ring was opened by a MRP_LinkChange from a MRC
++	 * before the test frames timed out, the kernel never reported loc true
++	 * (it does that only in the closed state), both ports still have loc
++	 * false and the MRM would stay in CHK_RO with the ring closed.
++	 */
++	if (p->loc == loc &&
++	    (loc || mrp->ring_role != BR_MRP_RING_ROLE_MRM ||
++	     mrp->mrm_state == MRP_MRM_STATE_CHK_RC))
+ 		goto out;
+ 
+ 	p->loc = loc;
