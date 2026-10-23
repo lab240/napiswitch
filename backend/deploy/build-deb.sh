@@ -27,7 +27,7 @@ DEBIAN=https://deb.debian.org/debian
 rev=$(git rev-parse --short HEAD)
 VER=0.1.0~git.$rev
 # +napiN: our fixes on top of the pinned commit (deploy/mrp-patches).
-MRPVER=0~git.${MRP:0:7}+napi1
+MRPVER=0~git.${MRP:0:7}+napi2
 
 MRP_ARCHES=${MRP_ARCHES:-arm64 amd64}
 

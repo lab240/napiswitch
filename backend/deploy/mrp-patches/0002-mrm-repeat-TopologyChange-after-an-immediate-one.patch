@@ -1,0 +1,130 @@
+From: NapiLab <info@napilab.ru>
+Subject: [PATCH] mrm: send a second TopologyChange after an immediate one
+
+With react_on_link_change the MRM sends MRP_TopologyChange with interval 0
+and MRCs flush their FDB at once. A frame that was still queued in the ring
+when the MRM blocked its secondary port can arrive after that flush and teach
+a node the old path; nothing corrects the entry until the node hears from
+that MAC again. Seen on a loaded 3-node ring: a reply queued ~40 ms behind
+iperf traffic made a MRC learn the MRM's MAC on the wrong port, the MRC and
+its neighbour lost the MRM for 6-42 s.
+
+Repeat the TopologyChange (interval 0) and the MRM flush 10 x MRP_TOPchgT
+(at least 100 ms) later.
+---
+ state_machine.c |  2 ++
+ state_machine.h |  3 +++
+ timer.c         | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 47 insertions(+)
+
+diff --git a/state_machine.c b/state_machine.c
+index 5527da4..2235d0c 100644
+--- a/state_machine.c
++++ b/state_machine.c
+@@ -492,6 +492,8 @@ void mrp_ring_topo_req(struct mrp *mrp, uint32_t time)
+ 
+ 	if (!time) {
+ 		mrp_netlink_flush(mrp);
++		if (mrp->ring_role == BR_MRP_RING_ROLE_MRM)
++			mrp_ring_topo_again_start(mrp);
+ 	} else {
+ 		uint32_t delay = mrp->ring_topo_conf_interval;
+ 
+diff --git a/state_machine.h b/state_machine.h
+index 8ac9d74..66fce8b 100644
+--- a/state_machine.h
++++ b/state_machine.h
+@@ -92,6 +92,7 @@ struct mrp {
+ 	uint32_t			ring_topo_conf_max;
+ 	uint32_t			ring_topo_curr_max;
+ 	bool				ring_topo_running;
++	ev_timer			ring_topo_again_work;
+ 
+ 	ev_timer			ring_link_up_work;
+ 	ev_timer			ring_link_down_work;
+@@ -196,6 +197,8 @@ int mrp_ring_test_start(struct mrp *mrp, uint32_t interval);
+ void mrp_ring_test_stop(struct mrp *mrp);
+ void mrp_ring_topo_start(struct mrp *mrp, uint32_t interval);
+ void mrp_ring_topo_stop(struct mrp *mrp);
++void mrp_ring_topo_again_start(struct mrp *mrp);
++void mrp_ring_topo_again_stop(struct mrp *mrp);
+ void mrp_ring_link_up_start(struct mrp *mrp, uint32_t interval);
+ void mrp_ring_link_up_stop(struct mrp *mrp);
+ void mrp_ring_link_down_start(struct mrp *mrp, uint32_t interval);
+diff --git a/timer.c b/timer.c
+index 4653765..d2c2c46 100644
+--- a/timer.c
++++ b/timer.c
+@@ -153,6 +153,30 @@ static void mrp_ring_topo_expired(struct ev_loop *loop,
+ 	pthread_mutex_unlock(&mrp->lock);
+ }
+ 
++/* Second MRP_TopologyChange after an immediate one (interval 0): MRCs flushed
++ * at once, so a frame that was still queued somewhere in the ring when the
++ * MRM blocked its port can arrive after the flush and teach a node the old
++ * path. Nothing corrects that entry until the node hears from that MAC again,
++ * which for a quiet host can take tens of seconds. Flush once more.
++ */
++static void mrp_ring_topo_again_expired(struct ev_loop *loop,
++					ev_timer *w, int revents)
++{
++	struct mrp *mrp = container_of(w, struct mrp, ring_topo_again_work);
++
++	pr_info("ring topo again");
++
++	pthread_mutex_lock(&mrp->lock);
++
++	mrp_ring_topo_again_stop(mrp);
++	if (mrp->ring_role == BR_MRP_RING_ROLE_MRM) {
++		mrp_ring_topo_send(mrp, 0);
++		mrp_netlink_flush(mrp);
++	}
++
++	pthread_mutex_unlock(&mrp->lock);
++}
++
+ static void mrp_ring_link_up_expired(struct ev_loop *loop,
+ 				     ev_timer *w, int revents)
+ {
+@@ -434,6 +458,22 @@ void mrp_ring_topo_stop(struct mrp *mrp)
+ 	ev_timer_stop(EV_DEFAULT, &mrp->ring_topo_work);
+ }
+ 
++/* 10 x MRP_TOPchgT, at least 100 ms */
++void mrp_ring_topo_again_start(struct mrp *mrp)
++{
++	uint32_t interval = 10 * mrp->ring_topo_conf_interval;
++
++	if (interval < 100 * 1000)
++		interval = 100 * 1000;
++	mrp->ring_topo_again_work.repeat = (ev_tstamp)interval / 1000000;
++	ev_timer_again(EV_DEFAULT, &mrp->ring_topo_again_work);
++}
++
++void mrp_ring_topo_again_stop(struct mrp *mrp)
++{
++	ev_timer_stop(EV_DEFAULT, &mrp->ring_topo_again_work);
++}
++
+ void mrp_ring_link_up_start(struct mrp *mrp, uint32_t interval)
+ {
+ 	mrp->ring_link_up_work.repeat = (ev_tstamp)interval / 1000000;
+@@ -560,6 +600,7 @@ void mrp_timer_stop(struct mrp *mrp)
+ {
+ 	mrp_clear_fdb_stop(mrp);
+ 	mrp_ring_topo_stop(mrp);
++	mrp_ring_topo_again_stop(mrp);
+ 	mrp_ring_link_up_stop(mrp);
+ 	mrp_ring_link_down_stop(mrp);
+ 	mrp_ring_test_stop(mrp);
+@@ -582,6 +623,7 @@ void mrp_timer_init(struct mrp *mrp)
+ {
+ 	ev_init(&mrp->clear_fdb_work, mrp_clear_fdb_expired);
+ 	ev_init(&mrp->ring_topo_work, mrp_ring_topo_expired);
++	ev_init(&mrp->ring_topo_again_work, mrp_ring_topo_again_expired);
+ 	ev_init(&mrp->ring_test_work, mrp_ring_test_expired);
+ 	ev_init(&mrp->ring_watcher_work, mrp_ring_watcher_expired);
+ 	ev_init(&mrp->ring_link_up_work, mrp_ring_link_up_expired);
+-- 
+2.53.0
+

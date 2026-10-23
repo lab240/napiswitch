@@ -6,7 +6,7 @@ set -e
 CFM=7a50f4adcccf2d2e910816ea6d78446fea8fe7d8
 MRP=177717ee893d5ccc6e31147b1b8a720c9b798b81
 stamp=/usr/local/share/napi-switch/mrp.version
-if [ "$(cat $stamp 2>/dev/null)" = "$MRP+napi1" ] && [ -x /usr/local/sbin/mrp_server ]; then
+if [ "$(cat $stamp 2>/dev/null)" = "$MRP+napi2" ] && [ -x /usr/local/sbin/mrp_server ]; then
 	echo "mrp: $MRP already installed"; exit 0
 fi
 export DEBIAN_FRONTEND=noninteractive
@@ -23,5 +23,5 @@ for p in "$(dirname "$(realpath "$0")")"/mrp-patches/*.patch; do [ -e "$p" ] && 
 (mkdir -p cfm/build && cd cfm/build && cmake .. >/dev/null && make -s -j4)
 (mkdir -p mrp/build && cd mrp/build && cmake -DLibCFM_INCLUDE_DIR=$src/cfm -DLibCFM_LIBRARY=$src/cfm/build/libcfm_netlink.a .. >/dev/null && make -s -j4)
 install -m 755 mrp/build/mrp_server mrp/build/mrp /usr/local/sbin/
-mkdir -p "$(dirname $stamp)" && echo $MRP+napi1 > $stamp
+mkdir -p "$(dirname $stamp)" && echo $MRP+napi2 > $stamp
 echo "mrp: installed $MRP"
