@@ -48,6 +48,8 @@ func main() {
 	netDir := flag.String("netdir", "/etc/systemd/network", "networkd drop-in directory")
 	runNetDir := flag.String("run-netdir", "/run/systemd/network", "runtime networkd directory (applied L3 config)")
 	fwFile := flag.String("fw-file", "/run/napi-switch/firewall.nft", "nft script of the loaded firewall")
+	nmDir := flag.String("nm-dir", "/etc/NetworkManager/conf.d", "NetworkManager conf.d (saved: keep NM off the WAN)")
+	nmRunDir := flag.String("run-nm-dir", "/run/NetworkManager/conf.d", "runtime NetworkManager conf.d (applied)")
 	dry := flag.Bool("dry-run", false, "log commands instead of executing them")
 	rmiiFix := flag.Bool("rmii-fix", true, "TEMPORARY board-bug workaround: switch the KSZ CPU port to the SoC's RMII clock (no-op once R29 is reworked)")
 	kszMod := flag.String("kszreg-module", "/usr/lib/napi-switch/kszreg-%s.ko", "one-shot register module (%s = kernel release)")
@@ -67,7 +69,7 @@ func main() {
 	}
 	paths := Paths{Config: *cfgPath, NetDir: *netDir,
 		NetSearch: []string{*netDir, "/run/systemd/network", "/usr/lib/systemd/network"},
-		RunNetDir: *runNetDir, FWFile: *fwFile}
+		RunNetDir: *runNetDir, FWFile: *fwFile, NMDir: *nmDir, NMRunDir: *nmRunDir}
 	webPort := 0
 	if _, p, err := net.SplitHostPort(*listen); err == nil {
 		webPort, _ = strconv.Atoi(p)

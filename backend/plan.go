@@ -16,6 +16,7 @@ type PlanOpts struct {
 	ResyncVLANs bool
 	// L3 files: runtime networkd directory, nft script, config path for headers.
 	RunNetDir, FWFile, CfgPath string
+	NMRunDir                   string // runtime NetworkManager conf.d
 }
 
 func onoff(b bool) string {

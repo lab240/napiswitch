@@ -459,6 +459,13 @@ MRP и STP в ядре взаимоисключающие: с `mrp` нужно `
 `null` — адресами управляет netplan (как после установки). Если указана — адресами управляет
 демон через systemd-networkd, межсетевым экраном — через nftables.
 
+NetworkManager при этом на WAN не работает: демон вносит карту WAN в его список unmanaged
+(`/run/NetworkManager/conf.d/91-napi-switchd-wan-applied.conf` для применённой конфигурации,
+`/etc/NetworkManager/conf.d/90-napi-switchd-wan.conf` для сохранённой), иначе NM получал бы
+по DHCP второй адрес и второй маршрут по умолчанию. DHCP на WAN идёт с идентификатором
+клиента по MAC (`ClientIdentifier=mac`), поэтому адрес остаётся тем, что был выдан карте до
+перехода под управление демона.
+
 ```json
 "network": {
   "mode": "router",

@@ -10,6 +10,14 @@ package main
 // a reboot, so the saved file wins; with neither, netplan's files apply again.
 // networkd itself does DHCP (client and server), NAT (IPMasquerade) and
 // forwarding; only the firewall needs nft.
+//
+// Armbian's netplan hands every other ethernet to NetworkManager, so NM would
+// also run DHCP on the WAN NIC (two leases, two default routes). While the
+// daemon owns the network, a conf.d file puts the WAN on NM's unmanaged list:
+// /run/NetworkManager/conf.d/91-napi-switchd-wan-applied.conf for the applied
+// config, /etc/NetworkManager/conf.d/90-napi-switchd-wan.conf for the saved one.
+// Different names (NM lets an /etc file hide a /run file of the same name) and
+// "+=" (the trunk0 entry of the image stays), so both add up.
 
 import (
 	"encoding/json"
@@ -30,6 +38,8 @@ const (
 	fwTable      = "napi_switchd"
 	unitWAN      = "wan.network"
 	unitLAN      = "lan.network"
+	nmRunFile    = "91-napi-switchd-wan-applied.conf"
+	nmEtcFile    = "90-napi-switchd-wan.conf"
 )
 
 type Network struct {
@@ -95,6 +105,7 @@ type NetState struct {
 	InRun    map[string]bool   `json:"-"` // unit has a /run file
 	NFT      bool              `json:"nft"`
 	FWLoaded string            `json:"-"` // ruleset we loaded, "" = table absent
+	NMFile   string            `json:"-"` // effective NetworkManager file of ours ("" = none)
 	WebPort  int               `json:"web_port"`
 }
 
@@ -401,7 +412,9 @@ func RenderNetwork(c *Config, bridge, cfgPath string) map[string]string {
 			s.WriteString("IPv4Forwarding=yes\n")
 		}
 		if w.Proto == "dhcp" {
-			s.WriteString("\n[DHCPv4]\nRouteMetric=100\nUseMTU=yes\n")
+			// ClientIdentifier=mac: the lease NetworkManager or any other client
+			// of this NIC had (networkd defaults to a DUID and gets a new address).
+			s.WriteString("\n[DHCPv4]\nClientIdentifier=mac\nRouteMetric=100\nUseMTU=yes\n")
 			if len(w.DNS) > 0 {
 				s.WriteString("UseDNS=no\n\n[DHCPv6]\nUseDNS=no\n")
 			}
@@ -463,6 +476,15 @@ func RenderNetwork(c *Config, bridge, cfgPath string) map[string]string {
 
 // RenderFirewall returns the nft script for our table, "" when none is needed.
 // It replaces the table atomically: create (no-op if present), delete, define.
+// RenderNMUnmanaged is the NetworkManager conf.d file that keeps NM off the
+// WAN NIC, "" when netplan (and so NM) owns the network.
+func RenderNMUnmanaged(c *Config, cfgPath string) string {
+	if c.Network == nil || c.Network.WAN.Interface == "" {
+		return ""
+	}
+	return netHeader(cfgPath) + "\n[keyfile]\nunmanaged-devices+=interface-name:" + c.Network.WAN.Interface + "\n"
+}
+
 func RenderFirewall(n *Network, webPort int) string {
 	if !n.router() || (!n.Firewall.Enabled && len(n.Firewall.PortForwards) == 0) {
 		return ""
@@ -518,6 +540,20 @@ func planNetwork(want *Config, run *Running, o PlanOpts) []Cmd {
 		return nil
 	}
 	var cmds []Cmd
+	// NM lets go of the WAN before networkd takes it. NM may set a device it
+	// releases down, so the WAN is brought back up right after.
+	if nm := RenderNMUnmanaged(want, o.CfgPath); nm != st.NMFile {
+		path := filepath.Join(o.NMRunDir, nmRunFile)
+		if nm == "" {
+			cmds = append(cmds, removeFile(path))
+		} else {
+			cmds = append(cmds, writeFile(path, nm))
+		}
+		cmds = append(cmds, cmdIgn("nmcli", "general", "reload", "conf"))
+		if nm != "" {
+			cmds = append(cmds, cmdIgn("ip", "link", "set", want.Network.WAN.Interface, "up"))
+		}
+	}
 	desired := RenderNetwork(want, o.Bridge, o.CfgPath)
 	var reconf []string
 	for _, u := range []string{unitWAN, unitLAN} {
@@ -593,6 +629,11 @@ func readNetState(r Runner, p Paths, webPort int) *NetState {
 			st.Files[u] = string(b)
 		}
 	}
+	if b, err := os.ReadFile(filepath.Join(p.NMRunDir, nmRunFile)); err == nil {
+		st.NMFile = string(b)
+	} else if b, err := os.ReadFile(filepath.Join(p.NMDir, nmEtcFile)); err == nil {
+		st.NMFile = string(b)
+	}
 	if _, err := r.Output("nft", "--version"); err == nil {
 		st.NFT = true
 		if _, err := r.Output("nft", "list", "table", "inet", fwTable); err == nil {
@@ -606,13 +647,20 @@ func readNetState(r Runner, p Paths, webPort int) *NetState {
 	return st
 }
 
-// saveNetwork writes (or removes) the persistent copies of our units.
+// saveNetwork writes (or removes) the persistent copies of our units and of
+// the NetworkManager file.
 func saveNetwork(c *Config, p Paths, bridge string) ([]string, error) {
-	files := RenderNetwork(c, bridge, p.Config)
+	files := map[string]string{}
+	for u, d := range RenderNetwork(c, bridge, p.Config) {
+		files[filepath.Join(p.NetDir, netEtcPrefix+u)] = d
+	}
+	nmPath := filepath.Join(p.NMDir, nmEtcFile)
+	if nm := RenderNMUnmanaged(c, p.Config); nm != "" {
+		files[nmPath] = nm
+	}
 	var written []string
-	for _, u := range []string{unitWAN, unitLAN} {
-		path := filepath.Join(p.NetDir, netEtcPrefix+u)
-		d, ok := files[u]
+	for _, path := range []string{filepath.Join(p.NetDir, netEtcPrefix+unitWAN), filepath.Join(p.NetDir, netEtcPrefix+unitLAN), nmPath} {
+		d, ok := files[path]
 		if !ok {
 			if err := os.Remove(path); err == nil {
 				written = append(written, path+" (removed)")

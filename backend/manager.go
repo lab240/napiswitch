@@ -77,7 +77,7 @@ func (m *Manager) state() (*Running, error) {
 }
 
 func (m *Manager) opts(resync bool) PlanOpts {
-	return PlanOpts{Bridge: m.bridge, ResyncVLANs: resync, RunNetDir: m.paths.RunNetDir, FWFile: m.paths.FWFile, CfgPath: m.paths.Config}
+	return PlanOpts{Bridge: m.bridge, ResyncVLANs: resync, RunNetDir: m.paths.RunNetDir, FWFile: m.paths.FWFile, CfgPath: m.paths.Config, NMRunDir: m.paths.NMRunDir}
 }
 
 // validate checks c against the hardware and, for the L3 part, the live

@@ -42,7 +42,7 @@ func mustNotContain(t *testing.T, name, got string, bad ...string) {
 func TestRenderSwitchModeMatchesNetplan(t *testing.T) {
 	f := RenderNetwork(netConfig("switch"), "br0", "/etc/napi-switch/config.json")
 	mustContain(t, "wan", f[unitWAN], "[Match]\nName=enx00e04c680026\n", "DHCP=yes\n", "IPv6PrivacyExtensions=yes",
-		"LinkLocalAddressing=ipv6", "[DHCPv4]\nRouteMetric=100\nUseMTU=yes\n")
+		"LinkLocalAddressing=ipv6", "[DHCPv4]\nClientIdentifier=mac\nRouteMetric=100\nUseMTU=yes\n")
 	mustContain(t, "lan", f[unitLAN], "[Match]\nName=br0\n", "DHCP=ipv4\n", "ConfigureWithoutCarrier=yes",
 		"[DHCPv4]\nRouteMetric=200\nUseMTU=yes\n")
 	mustNotContain(t, "switch mode", f[unitWAN]+f[unitLAN], "IPMasquerade", "DHCPServer", "IPv4Forwarding", "Address=")
@@ -180,20 +180,26 @@ func netRunning(files map[string]string, fw string) *Running {
 	run := testRunning()
 	run.Ethers = []string{"enx00e04c680026"}
 	run.Net = &NetState{Files: files, InRun: map[string]bool{}, NFT: true, FWLoaded: fw, WebPort: 8080}
+	if len(files) > 0 { // our units in place: so is our NetworkManager file
+		run.Net.NMFile = RenderNMUnmanaged(netConfig("switch"), "cfg")
+	}
 	return run
 }
 
-var netOpts = PlanOpts{Bridge: "br0", RunNetDir: "/run/systemd/network", FWFile: "/run/napi-switch/firewall.nft", CfgPath: "cfg"}
+var netOpts = PlanOpts{Bridge: "br0", RunNetDir: "/run/systemd/network", FWFile: "/run/napi-switch/firewall.nft", CfgPath: "cfg",
+	NMRunDir: "/run/NetworkManager/conf.d"}
 
 func TestPlanNetwork(t *testing.T) {
 	// Unmanaged and nothing of ours on disk: no L3 commands.
 	if p := planNetwork(DefaultConfig(testPorts), netRunning(map[string]string{}, ""), netOpts); len(p) != 0 {
 		t.Fatalf("unmanaged: %q", strs(p))
 	}
-	// Taking over in switch mode: write both units, reload, reconfigure.
+	// Taking over in switch mode: NM lets go of the WAN (and the WAN is kept up),
+	// then both units are written, reloaded, reconfigured.
 	c := netConfig("switch")
 	got := strs(planNetwork(c, netRunning(map[string]string{}, ""), netOpts))
-	want := []string{"write /run/systemd/network/03-napi-switchd-wan.network", "write /run/systemd/network/03-napi-switchd-lan.network",
+	want := []string{"write /run/NetworkManager/conf.d/91-napi-switchd-wan-applied.conf", "nmcli general reload conf",
+		"ip link set enx00e04c680026 up", "write /run/systemd/network/03-napi-switchd-wan.network", "write /run/systemd/network/03-napi-switchd-lan.network",
 		"networkctl reload", "networkctl reconfigure br0", "networkctl reconfigure enx00e04c680026"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("takeover:\n%s", strings.Join(got, "\n"))
@@ -223,7 +229,8 @@ func TestPlanNetwork(t *testing.T) {
 	m := netConfig("switch")
 	m.Network.WAN.Interface = "enx112233445566"
 	got = strs(planNetwork(m, netRunning(files, ""), netOpts))
-	if !slices.Contains(got, "networkctl reconfigure enx00e04c680026") || !slices.Contains(got, "networkctl reconfigure enx112233445566") {
+	if !slices.Contains(got, "networkctl reconfigure enx00e04c680026") || !slices.Contains(got, "networkctl reconfigure enx112233445566") ||
+		!slices.Contains(got, "ip link set enx112233445566 up") {
 		t.Fatalf("wan move:\n%s", strings.Join(got, "\n"))
 	}
 	// No nft on the board: firewall silently not planned (validation warns).
@@ -247,17 +254,19 @@ func TestFindUnitSkipsOwnFiles(t *testing.T) {
 
 func TestSaveNetwork(t *testing.T) {
 	d := t.TempDir()
-	p := Paths{Config: filepath.Join(d, "config.json"), NetDir: d}
+	p := Paths{Config: filepath.Join(d, "config.json"), NetDir: d, NMDir: filepath.Join(d, "nm")}
 	c := netConfig("router")
 	files, err := saveNetwork(c, p, "br0")
-	if err != nil || len(files) != 2 {
+	if err != nil || len(files) != 3 {
 		t.Fatalf("save: %v %q", err, files)
 	}
 	b, _ := os.ReadFile(filepath.Join(d, "04-napi-switchd-lan.network"))
 	mustContain(t, "saved lan", string(b), "IPMasquerade=ipv4")
+	b, _ = os.ReadFile(filepath.Join(d, "nm", "90-napi-switchd-wan.conf"))
+	mustContain(t, "saved nm", string(b), "[keyfile]\nunmanaged-devices+=interface-name:enx00e04c680026\n")
 	c.Network = nil
 	files, _ = saveNetwork(c, p, "br0")
-	if len(files) != 2 || !strings.HasSuffix(files[0], "(removed)") {
+	if len(files) != 3 || !strings.HasSuffix(files[0], "(removed)") || !strings.HasSuffix(files[2], "(removed)") {
 		t.Fatalf("unmanage: %q", files)
 	}
 	if _, err := os.Stat(filepath.Join(d, "04-napi-switchd-wan.network")); err == nil {

@@ -25,6 +25,8 @@ type Paths struct {
 	NetSearch []string
 	RunNetDir string // runtime networkd files (/run/systemd/network)
 	FWFile    string // loaded nft script (/run/napi-switch/firewall.nft)
+	NMDir     string // saved NetworkManager conf.d (/etc/NetworkManager/conf.d)
+	NMRunDir  string // runtime NetworkManager conf.d (/run/NetworkManager/conf.d)
 }
 
 // findUnit returns the basename of the networkd file matching an interface,
