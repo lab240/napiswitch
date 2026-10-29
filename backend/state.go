@@ -298,10 +298,109 @@ func parseMRP(out, bridge string) *RunMRP {
 // interfaces (ptp4l numbers ports 1..N in the order of its config
 // sections), ptpDev is the hardware clock the KSZ exposes.
 var (
-	ptpCLI  = "/usr/sbin/pmc"
-	ptpConf = "/etc/linuxptp/napi-ptp.conf"
-	ptpDev  = "/dev/ptp0"
+	ptpCLI     = "/usr/sbin/pmc"
+	ptpConf    = "/etc/linuxptp/napi-ptp.conf"
+	ptpDev     = "/dev/ptp0"
+	ptpService = "ptp4l-napi" // systemd unit running ptp4l
 )
+
+// PTPConfig is the editable part of the ptp4l config: the BMCA role and the
+// announced priority1. mode is "master" (can become grandmaster) or "slave"
+// (slaveOnly, never a master). priority1 decides who wins BMCA (lower wins).
+type PTPConfig struct {
+	Mode      string `json:"mode"`
+	Priority1 int    `json:"priority1"`
+}
+
+// readPTPConfig reads the mode/priority1 from napi-ptp.conf. Defaults to
+// master/64 when the keys are absent (ptp4l's own defaults).
+func readPTPConfig(path string) *PTPConfig {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	c := &PTPConfig{Mode: "master", Priority1: 64}
+	inGlobal := false
+	for _, ln := range strings.Split(string(b), "\n") {
+		t := strings.TrimSpace(ln)
+		if len(t) > 1 && t[0] == '[' {
+			inGlobal = t == "[global]"
+			continue
+		}
+		if !inGlobal {
+			continue
+		}
+		f := strings.Fields(t)
+		if len(f) < 2 {
+			continue
+		}
+		switch f[0] {
+		case "slaveOnly":
+			if f[1] == "1" {
+				c.Mode = "slave"
+			}
+		case "priority1":
+			n, _ := strconv.Atoi(f[1])
+			c.Priority1 = n
+		}
+	}
+	return c
+}
+
+// buildPTPConf rewrites slaveOnly and priority1 in the [global] section of an
+// existing ptp4l config, preserving every other line and the interface
+// sections. Missing keys are appended to [global].
+func buildPTPConf(existing, mode string, prio int) string {
+	slave := "0"
+	if mode == "slave" {
+		slave = "1"
+	}
+	want := []struct{ k, v string }{{"slaveOnly", slave}, {"priority1", strconv.Itoa(prio)}}
+	set := func(k string) (string, bool) {
+		for _, w := range want {
+			if w.k == k {
+				return w.v, true
+			}
+		}
+		return "", false
+	}
+	seen := map[string]bool{}
+	var out []string
+	inGlobal := false
+	flushMissing := func() {
+		for _, w := range want {
+			if !seen[w.k] {
+				out = append(out, fmt.Sprintf("%-23s %s", w.k, w.v))
+				seen[w.k] = true
+			}
+		}
+	}
+	for _, ln := range strings.Split(existing, "\n") {
+		t := strings.TrimSpace(ln)
+		if len(t) > 1 && t[0] == '[' {
+			if inGlobal {
+				flushMissing() // append keys missing from [global] before leaving it
+			}
+			inGlobal = t == "[global]"
+			out = append(out, ln)
+			continue
+		}
+		if inGlobal {
+			if f := strings.Fields(t); len(f) >= 1 {
+				if v, ok := set(f[0]); ok {
+					out = append(out, fmt.Sprintf("%-23s %s", f[0], v))
+					seen[f[0]] = true
+					continue
+				}
+			}
+		}
+		out = append(out, ln)
+	}
+	if inGlobal {
+		flushMissing()
+	}
+	return strings.Join(out, "\n")
+}
 
 // RunPTP is the IEEE 1588 state read from ptp4l via pmc.
 type RunPTP struct {

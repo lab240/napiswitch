@@ -63,6 +63,7 @@ func (a *API) Handler() http.Handler {
 	h("GET "+apiPrefix+"/mirror", a.mirror)
 	h("GET "+apiPrefix+"/mrp", a.mrp)
 	h("GET "+apiPrefix+"/ptp", a.ptp)
+	h("PUT "+apiPrefix+"/ptp", a.setPTP)
 	h("GET "+apiPrefix+"/network", a.network)
 
 	h("GET "+apiPrefix+"/config", func(*http.Request) (any, error) { return a.m.View(), nil })
@@ -544,7 +545,41 @@ func (a *API) mrp(*http.Request) (any, error) {
 // clock runs as its own service (ptp4l-napi), independent of the config.
 func (a *API) ptp(*http.Request) (any, error) {
 	clock, avail, running := a.m.PTP()
-	return map[string]any{"available": avail, "running": running, "clock": clock}, nil
+	return map[string]any{"available": avail, "running": running, "clock": clock, "config": a.m.PTPConfig()}, nil
+}
+
+// setPTP changes the ptp4l role (master/slave) and priority1, then restarts
+// the service. Needs a hardware clock; the daemon runs independently of the
+// main config, so this is not part of the confirm/rollback flow.
+func (a *API) setPTP(r *http.Request) (any, error) {
+	b, err := readBody(r)
+	if err != nil {
+		return nil, err
+	}
+	var req struct {
+		Mode      string `json:"mode"`
+		Priority1 *int   `json:"priority1"`
+	}
+	if err := decodeStrict(b, &req); err != nil {
+		return nil, err
+	}
+	if req.Mode != "master" && req.Mode != "slave" {
+		return nil, badReq(`mode должен быть "master" или "slave"`)
+	}
+	prio := 64
+	if req.Priority1 != nil {
+		prio = *req.Priority1
+	}
+	if prio < 0 || prio > 255 {
+		return nil, badReq("priority1 должен быть в диапазоне 0..255")
+	}
+	if _, avail, _ := a.m.PTP(); !avail {
+		return nil, badReq("PTP недоступен: нет аппаратных часов")
+	}
+	if err := a.m.SetPTP(req.Mode, prio); err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "applied", "mode": req.Mode, "priority1": prio}, nil
 }
 
 // network reports the L3 state: WAN candidates with their addresses, the

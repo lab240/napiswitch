@@ -229,6 +229,32 @@ func (m *Manager) PTP() (*RunPTP, bool, bool) {
 	return readPTP(m.r)
 }
 
+// PTPConfig reports the editable ptp4l settings (mode, priority1) from the
+// config file, or nil if it cannot be read.
+func (m *Manager) PTPConfig() *PTPConfig {
+	return readPTPConfig(ptpConf)
+}
+
+// SetPTP rewrites the ptp4l config to the given mode ("master"/"slave") and
+// priority1, then restarts the ptp4l service. ptp4l runs independently of the
+// main config, so this is applied directly rather than through the plan.
+func (m *Manager) SetPTP(mode string, prio int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := os.ReadFile(ptpConf)
+	if err != nil {
+		return fmt.Errorf("чтение %s: %w", ptpConf, err)
+	}
+	if err := m.r.Exec(writeFile(ptpConf, buildPTPConf(string(b), mode, prio))); err != nil {
+		return err
+	}
+	if err := m.r.Exec(cmd("systemctl", "restart", ptpService)); err != nil {
+		return err
+	}
+	m.event("ptp: режим %s, priority1 %d, ptp4l-napi перезапущен", mode, prio)
+	return nil
+}
+
 // Preview validates and plans without changing anything.
 func (m *Manager) Preview(c *Config) (*ApplyResult, error) {
 	c.Normalize()

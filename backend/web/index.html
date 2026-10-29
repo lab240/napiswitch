@@ -853,12 +853,38 @@ function ptpLive() {
   <table style="margin-top:12px"><thead><tr><th>Порт</th><th>Состояние</th><th>Задержка линка (P2P)</th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="note">нет активных портов</td></tr>`}</tbody></table>`;
 }
 function viewPTP() {
+  const d = S.ptp, avail = d && d.available;
+  const cfg = (d && d.config) || { mode: "master", priority1: 64 };
+  const ctrl = !avail ? "" : `
+    <div class="form" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+      <label>Режим</label>
+      <div><select id="ptp-mode">
+        <option value="master" ${cfg.mode === "master" ? "selected" : ""}>Менеджер времени (мастер / GM)</option>
+        <option value="slave" ${cfg.mode === "slave" ? "selected" : ""}>Ведомый (slave — только принимает)</option>
+      </select></div>
+      <label>Priority1</label>
+      <div><input type="number" id="ptp-prio" min="0" max="255" value="${cfg.priority1}" style="width:90px">
+        <span class="note">кто выигрывает BMCA: меньше — выше шанс стать мастером (0..255; у Kyland обычно 128)</span></div>
+      <label></label>
+      <div><button class="btn" id="ptp-apply">Применить</button>
+        <span class="note">перезапишет <span class="mono">napi-ptp.conf</span> и перезапустит <span class="mono">ptp4l-napi</span></span></div>
+    </div>`;
   return `<div class="grid2"><div class="card"><h2>PTP (IEEE 1588 / 802.1AS)</h2><div class="body">
     <p>Точная синхронизация времени по сети с <b>аппаратными метками времени</b> в чипе KSZ9567 (PHC <span class="mono">/dev/ptp0</span>, one-step P2P). Демон <span class="mono">ptp4l</span> работает как служба <span class="mono">ptp4l-napi</span> параллельно с кольцом MRP.</p>
-    <p class="note">Открытые стандарты IEC/IEEE: профиль 1588 по умолчанию и gPTP (802.1AS), транспорт Ethernet (L2), механизм задержки peer-to-peer. Интероп с промышленным Kyland SICOM3000A подтверждён. Конфигурация демона — файл <span class="mono">/etc/linuxptp/napi-ptp.conf</span> (настройка из веб-морды — в планах).</p>
+    <p class="note">Открытые стандарты IEC/IEEE: профиль 1588 по умолчанию и gPTP (802.1AS), транспорт Ethernet (L2), механизм задержки peer-to-peer. Интероп с промышленным Kyland SICOM3000A подтверждён. Конфигурация демона — файл <span class="mono">/etc/linuxptp/napi-ptp.conf</span>.</p>
+    ${ctrl}
   </div></div>
   <div class="card"><h2>Состояние</h2><div class="body" id="ptp-live">${ptpLive()}</div></div></div>`;
 }
+$("#view").addEventListener("click", (e) => {
+  if (e.target.id !== "ptp-apply") return;
+  const mode = $("#ptp-mode").value, prio = +$("#ptp-prio").value;
+  if (Number.isNaN(prio) || prio < 0 || prio > 255) { toast("Priority1 должен быть 0..255", "bad"); return; }
+  const label = mode === "master" ? "Менеджер времени (мастер)" : "Ведомый (slave)";
+  openDialog("Сменить режим PTP", `<p>Применить режим <b>${esc(label)}</b>, Priority1 <b>${prio}</b>?</p><p class="note">Будет перезаписан napi-ptp.conf и перезапущен ptp4l-napi.</p>`, [["Применить", "", async () => {
+    try { await api("PUT", "/ptp", { mode, priority1: prio }); toast("Режим PTP применён", "ok"); await loadTabData(); render(); } catch (er) { showErr(er); }
+  }]]);
+});
 
 // ---------- FDB ----------
 function fdbLive() {

@@ -270,7 +270,24 @@ MAC-таблица. Фильтры: `?port=lan1`, `?vlan=10`, `?type=dynamic|sta
 не запущен; тогда `clock: null`. `gm_local` — этот свитч является Grand Master (источником
 времени). `offset_ns` осмыслен только когда мы подчинённый (`gm_local: false`). `one_step` —
 аппаратные метки времени one-step (KSZ9567). `peer_delay_ns` — задержка линка, измеренная
-механизмом P2P. PTP ведёт отдельная служба, из конфига `napi-switchd` не управляется.
+механизмом P2P. Блок `config` — редактируемые настройки (`{"mode": "master"|"slave", "priority1": N}`),
+прочитанные из `napi-ptp.conf`. PTP ведёт отдельная служба; роль/приоритет меняются через `PUT /ptp`,
+остальное правится в файле `/etc/linuxptp/napi-ptp.conf`.
+
+### `PUT /ptp`
+
+Сменить режим и приоритет PTP. Тело:
+
+```json
+{"mode": "master", "priority1": 64}
+```
+
+`mode`: `master` — может стать грандмастером (`slaveOnly 0`); `slave` — только подчинённый
+(`slaveOnly 1`, никогда не мастер). `priority1` (0..255, по умолчанию 64) решает исход BMCA —
+меньше значение выигрывает. Перезаписывает `[global]`-ключи `slaveOnly`/`priority1` в
+`napi-ptp.conf` (остальное сохраняется) и перезапускает службу `ptp4l-napi`. Требует аппаратных
+часов (иначе 400). Применяется сразу, вне потока confirm/rollback основного конфига. Ответ:
+`{"status": "applied", "mode": "master", "priority1": 64}`.
 
 ### `GET /network`
 
