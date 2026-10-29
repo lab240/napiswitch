@@ -185,7 +185,7 @@ pre.cmds { background: var(--panel2); border: 1px solid var(--line); border-radi
 "use strict";
 const API = "/api/v1";
 const TABS = [
-  ["ports", "Порты"], ["vlan", "VLAN"], ["net", "Сеть"], ["stp", "STP / MRP"], ["fdb", "MAC-таблица"],
+  ["ports", "Порты"], ["vlan", "VLAN"], ["net", "Сеть"], ["stp", "STP / MRP"], ["ptp", "PTP"], ["fdb", "MAC-таблица"],
   ["mcast", "Мультикаст"], ["mirror", "Зеркалирование"], ["system", "Система"], ["log", "Журнал"],
 ];
 const SPEED_LABEL = { auto: "Авто", "1000full": "1000 полный", "100full": "100 полный", "100half": "100 полу", "10full": "10 полный", "10half": "10 полу" };
@@ -300,6 +300,7 @@ async function loadStatus() {
 }
 async function loadTabData() {
   if (S.tab === "stp") [S.stp, S.mrp] = await Promise.all([api("GET", "/stp"), api("GET", "/mrp")]);
+  if (S.tab === "ptp") S.ptp = await api("GET", "/ptp");
   if (S.tab === "fdb") {
     const q = new URLSearchParams(Object.entries(S.fdbFilter).filter(([, v]) => v)).toString();
     S.fdb = await api("GET", "/fdb" + (q ? "?" + q : ""));
@@ -427,7 +428,7 @@ async function rollbackPending() {
 function render() {
   const v = $("#view");
   if (!S.draft) { v.innerHTML = `<p class="note">Загрузка…</p>`; return; }
-  const f = { ports: viewPorts, vlan: viewVLAN, net: viewNet, stp: viewSTP, fdb: viewFDB, mcast: viewMcast, mirror: viewMirror, system: viewSystem, log: viewLog }[S.tab];
+  const f = { ports: viewPorts, vlan: viewVLAN, net: viewNet, stp: viewSTP, ptp: viewPTP, fdb: viewFDB, mcast: viewMcast, mirror: viewMirror, system: viewSystem, log: viewLog }[S.tab];
   v.innerHTML = f();
   markDirty();
 }
@@ -496,6 +497,7 @@ function updateLive() {
   }
   { const c = document.getElementById("fp-wan"); if (c) c.closest(".wanblk").outerHTML = frontWAN(); }
   if (S.tab === "stp") { const el = $("#stp-live"); if (el) el.innerHTML = stpLive(); const m = $("#mrp-live"); if (m) m.innerHTML = mrpLive(); }
+  if (S.tab === "ptp") { const el = $("#ptp-live"); if (el) el.innerHTML = ptpLive(); }
   if (S.tab === "fdb") { const el = $("#fdb-live"); if (el) el.innerHTML = fdbLive(); }
   if (S.tab === "mcast") { const el = $("#mc-live"); if (el) el.innerHTML = mcastLive(); }
   if (S.tab === "log") { $("#view").innerHTML = viewLog(); }
@@ -817,6 +819,46 @@ $("#view").addEventListener("change", (e) => {
   }
   render(); changed();
 });
+
+// ---------- PTP ----------
+const PTP_STATE = {
+  MASTER: ["ok", "мастер (отдаёт время)"], SLAVE: ["ok", "slave (принимает время)"],
+  UNCALIBRATED: ["warn", "калибровка…"], PRE_MASTER: ["warn", "подготовка к мастеру"],
+  PASSIVE: ["warn", "пассивный"], LISTENING: ["warn", "слушает"], FAULTY: ["bad", "ошибка"],
+  INITIALIZING: ["warn", "инициализация"], DISABLED: ["", "выключен"],
+};
+function fmtNS(ns) {
+  return Math.abs(ns) >= 1000 ? (ns / 1000).toFixed(3) + " мкс" : ns + " нс";
+}
+function ptpLive() {
+  const d = S.ptp; if (!d) return `<p class="note">Загрузка…</p>`;
+  if (!d.available) return `<p class="note">PTP недоступен: аппаратные часы <span class="mono">/dev/ptp0</span> не найдены (драйвер KSZ собран без CONFIG_NET_DSA_MICROCHIP_KSZ_PTP).</p>`;
+  if (!d.running) return `<p class="note">Аппаратные часы есть, но демон <span class="mono">ptp4l</span> не запущен (служба <span class="mono">ptp4l-napi</span>).</p>`;
+  const c = d.clock; if (!c) return `<p class="note">Нет данных от ptp4l.</p>`;
+  const role = c.gm_local
+    ? `<span class="dot ok"></span>Grand Master — этот свитч раздаёт время`
+    : `<span class="dot ok"></span>подчинённый — синхронизируется от мастера`;
+  const rows = (c.ports || []).map((p) => {
+    const [cl, t] = PTP_STATE[p.state] || ["", p.state || "—"];
+    return `<tr><td>${esc(p.name)}</td><td><span class="chip ${cl}">${esc(t)}</span> <span class="note mono">${esc(p.state || "")}</span></td><td class="mono">${p.peer_delay_ns ? fmtNS(p.peer_delay_ns) : "—"}</td></tr>`;
+  }).join("");
+  return `<div class="kv">
+    <div>Роль</div><div>${role}</div>
+    <div>Grand Master</div><div class="mono">${esc(c.gm || "—")}${c.gm_local ? ` <span class="note">(это мы)</span>` : ""}</div>
+    <div>Наши часы (ID)</div><div class="mono">${esc(c.clock_id || "—")}</div>
+    ${!c.gm_local ? `<div>Offset от мастера</div><div>${fmtNS(c.offset_ns)}</div><div>Хопов до GM</div><div>${c.steps_removed}</div>` : ""}
+    <div>Приоритет 1</div><div>${c.priority1}</div>
+    <div>Класс часов</div><div>${c.clock_class}</div>
+    <div>Метки времени</div><div>${c.one_step ? "аппаратные, one-step" : "аппаратные, two-step"}</div></div>
+  <table style="margin-top:12px"><thead><tr><th>Порт</th><th>Состояние</th><th>Задержка линка (P2P)</th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="note">нет активных портов</td></tr>`}</tbody></table>`;
+}
+function viewPTP() {
+  return `<div class="grid2"><div class="card"><h2>PTP (IEEE 1588 / 802.1AS)</h2><div class="body">
+    <p>Точная синхронизация времени по сети с <b>аппаратными метками времени</b> в чипе KSZ9567 (PHC <span class="mono">/dev/ptp0</span>, one-step P2P). Демон <span class="mono">ptp4l</span> работает как служба <span class="mono">ptp4l-napi</span> параллельно с кольцом MRP.</p>
+    <p class="note">Открытые стандарты IEC/IEEE: профиль 1588 по умолчанию и gPTP (802.1AS), транспорт Ethernet (L2), механизм задержки peer-to-peer. Интероп с промышленным Kyland SICOM3000A подтверждён. Конфигурация демона — файл <span class="mono">/etc/linuxptp/napi-ptp.conf</span> (настройка из веб-морды — в планах).</p>
+  </div></div>
+  <div class="card"><h2>Состояние</h2><div class="body" id="ptp-live">${ptpLive()}</div></div></div>`;
+}
 
 // ---------- FDB ----------
 function fdbLive() {

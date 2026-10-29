@@ -222,6 +222,13 @@ func (m *Manager) Ports() ([]string, *Running, error) {
 	return sortedKeys(run.Ports), run, nil
 }
 
+// PTP reads the IEEE 1588 state on demand (ptp4l runs as its own
+// service, not from the config), returning the clock, whether a
+// hardware clock is present, and whether ptp4l is running.
+func (m *Manager) PTP() (*RunPTP, bool, bool) {
+	return readPTP(m.r)
+}
+
 // Preview validates and plans without changing anything.
 func (m *Manager) Preview(c *Config) (*ApplyResult, error) {
 	c.Normalize()

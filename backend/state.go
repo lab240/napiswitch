@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -291,6 +292,136 @@ func parseMRP(out, bridge string) *RunMRP {
 			Secondary: m["sport"], Profile: prof}, State: m["ring_state"]}
 	}
 	return nil
+}
+
+// The PTP stack: pmc queries the running ptp4l, ptpConf names the
+// interfaces (ptp4l numbers ports 1..N in the order of its config
+// sections), ptpDev is the hardware clock the KSZ exposes.
+var (
+	ptpCLI  = "/usr/sbin/pmc"
+	ptpConf = "/etc/linuxptp/napi-ptp.conf"
+	ptpDev  = "/dev/ptp0"
+)
+
+// RunPTP is the IEEE 1588 state read from ptp4l via pmc.
+type RunPTP struct {
+	ClockID    string    `json:"clock_id"`
+	GM         string    `json:"gm"`        // grandmaster clock identity
+	GMLocal    bool      `json:"gm_local"`  // this switch is the grandmaster
+	Priority1  int       `json:"priority1"` // our announced priority1
+	ClockClass int       `json:"clock_class"`
+	OneStep    bool      `json:"one_step"`      // one-step TX (KSZ hardware)
+	StepsRem   int       `json:"steps_removed"` // hops from the grandmaster
+	OffsetNS   int64     `json:"offset_ns"`     // offset from master (slave only)
+	Ports      []PTPPort `json:"ports"`
+}
+
+// PTPPort is one ptp4l port (a bridged interface) and its role.
+type PTPPort struct {
+	Name        string `json:"name"`
+	State       string `json:"state"`         // MASTER, SLAVE, LISTENING, ...
+	PeerDelayNS int64  `json:"peer_delay_ns"` // P2P peer mean path delay
+}
+
+// readPTP reports the PTP stack: available is true when a hardware clock
+// is present, running when ptp4l answers pmc. pmc fails fast when ptp4l
+// is down, so this never blocks for long.
+func readPTP(r Runner) (*RunPTP, bool, bool) {
+	_, statErr := os.Stat(ptpDev)
+	avail := statErr == nil
+	out, err := r.Output(ptpCLI, "-u", "-b", "0",
+		"GET DEFAULT_DATA_SET", "GET PARENT_DATA_SET", "GET CURRENT_DATA_SET", "GET PORT_DATA_SET")
+	if err != nil {
+		return nil, avail, false
+	}
+	p := parsePTP(string(out), ptpIfaces(ptpConf))
+	if p == nil {
+		return nil, avail, false
+	}
+	return p, avail, true
+}
+
+// ptpIfaces lists the interface names from a ptp4l config, in order, so
+// pmc's 1-based port numbers map back to names.
+func ptpIfaces(path string) []string {
+	var names []string
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return names
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		ln = strings.TrimSpace(ln)
+		if len(ln) > 2 && ln[0] == '[' && ln[len(ln)-1] == ']' {
+			if s := ln[1 : len(ln)-1]; s != "global" {
+				names = append(names, s)
+			}
+		}
+	}
+	return names
+}
+
+func parsePTP(out string, ifaces []string) *RunPTP {
+	p := &RunPTP{}
+	var cur *PTPPort
+	byNum := map[int]*PTPPort{}
+	atoi := func(s string) int { n, _ := strconv.Atoi(s); return n }
+	toNS := func(s string) int64 { v, _ := strconv.ParseFloat(s, 64); return int64(v) }
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 2 {
+			continue
+		}
+		switch f[0] {
+		case "clockIdentity":
+			if p.ClockID == "" {
+				p.ClockID = f[1]
+			}
+		case "grandmasterIdentity":
+			p.GM = f[1]
+		case "priority1":
+			p.Priority1 = atoi(f[1])
+		case "clockClass":
+			p.ClockClass = atoi(f[1])
+		case "twoStepFlag":
+			p.OneStep = f[1] == "0"
+		case "stepsRemoved":
+			p.StepsRem = atoi(f[1])
+		case "offsetFromMaster":
+			p.OffsetNS = toNS(f[1])
+		case "portIdentity":
+			num := 0
+			if i := strings.LastIndexByte(f[1], '-'); i >= 0 {
+				num = atoi(f[1][i+1:])
+			}
+			pp := &PTPPort{Name: fmt.Sprintf("порт %d", num)}
+			if num >= 1 && num <= len(ifaces) {
+				pp.Name = ifaces[num-1]
+			}
+			byNum[num] = pp
+			cur = pp
+		case "portState":
+			if cur != nil {
+				cur.State = f[1]
+			}
+		case "peerMeanPathDelay":
+			if cur != nil {
+				cur.PeerDelayNS = toNS(f[1])
+			}
+		}
+	}
+	if p.ClockID == "" && len(byNum) == 0 {
+		return nil
+	}
+	nums := make([]int, 0, len(byNum))
+	for n := range byNum {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	for _, n := range nums {
+		p.Ports = append(p.Ports, *byNum[n])
+	}
+	p.GMLocal = p.GM != "" && p.GM == p.ClockID
+	return p
 }
 
 func readVLANs(r Runner, run *Running, bridge string) error {

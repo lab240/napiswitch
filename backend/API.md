@@ -254,6 +254,24 @@ MAC-таблица. Фильтры: `?port=lan1`, `?vlan=10`, `?type=dynamic|sta
 `CHK_RO` (кольцо разомкнуто, оба порта передают), `CHK_RC` (кольцо замкнуто, запасной порт
 заблокирован); у MRC: `DE_IDLE`, `PT`, `DE`, `PT_IDLE` (в кольце).
 
+### `GET /ptp`
+
+Состояние PTP (IEEE 1588 / 802.1AS), прочитанное у `ptp4l` через `pmc`:
+
+```json
+{"available": true, "running": true,
+ "clock": {"clock_id": "12df33.fffe.92d652", "gm": "12df33.fffe.92d652", "gm_local": true,
+           "priority1": 64, "clock_class": 248, "one_step": true, "steps_removed": 0, "offset_ns": 0,
+           "ports": [{"name": "lan1", "state": "MASTER", "peer_delay_ns": 354}]}}
+```
+
+`available: false` — нет аппаратных часов (`/dev/ptp0`): драйвер KSZ собран без
+`CONFIG_NET_DSA_MICROCHIP_KSZ_PTP`. `running: false` — демон `ptp4l` (служба `ptp4l-napi`)
+не запущен; тогда `clock: null`. `gm_local` — этот свитч является Grand Master (источником
+времени). `offset_ns` осмыслен только когда мы подчинённый (`gm_local: false`). `one_step` —
+аппаратные метки времени one-step (KSZ9567). `peer_delay_ns` — задержка линка, измеренная
+механизмом P2P. PTP ведёт отдельная служба, из конфига `napi-switchd` не управляется.
+
 ### `GET /network`
 
 Адреса и маршрутизация (L3).

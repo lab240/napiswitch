@@ -62,6 +62,7 @@ func (a *API) Handler() http.Handler {
 	h("GET "+apiPrefix+"/multicast", a.multicast)
 	h("GET "+apiPrefix+"/mirror", a.mirror)
 	h("GET "+apiPrefix+"/mrp", a.mrp)
+	h("GET "+apiPrefix+"/ptp", a.ptp)
 	h("GET "+apiPrefix+"/network", a.network)
 
 	h("GET "+apiPrefix+"/config", func(*http.Request) (any, error) { return a.m.View(), nil })
@@ -538,6 +539,14 @@ func (a *API) mrp(*http.Request) (any, error) {
 	return map[string]any{"available": run.MRPAvail, "running": run.MRP, "profiles": mrpProfiles}, nil
 }
 
+// ptp reports the IEEE 1588 state from ptp4l (read via pmc); available is
+// false without a hardware clock, running false when ptp4l is not up. The
+// clock runs as its own service (ptp4l-napi), independent of the config.
+func (a *API) ptp(*http.Request) (any, error) {
+	clock, avail, running := a.m.PTP()
+	return map[string]any{"available": avail, "running": running, "clock": clock}, nil
+}
+
 // network reports the L3 state: WAN candidates with their addresses, the
 // bridge (LAN), DHCP leases, and a suggested config for taking over from netplan.
 func (a *API) network(*http.Request) (any, error) {
@@ -666,6 +675,7 @@ func (a *API) capabilities(*http.Request) (any, error) {
 		"igmp":        map[string]any{"snooping": true, "querier": true},
 		"mirror":      map[string]any{"sessions": 1, "directions": []string{"rx", "tx", "both"}},
 		"mrp":         map[string]any{"available": run.MRPAvail, "rings": 1, "roles": []string{"mrm", "mrc"}, "profiles": mrpProfiles, "offload": false},
+		"ptp":         map[string]any{"hw_timestamp": true, "phc": "KSZ9567", "transport": []string{"L2"}, "delay": []string{"p2p"}, "step": "onestep", "profiles": []string{"1588", "gptp"}},
 		"isolation":   true,
 		"learning":    true,
 		"jumbo":       false, // MTU change re-opens the CPU conduit, unsafe on this board
